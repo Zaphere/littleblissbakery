@@ -66,11 +66,9 @@ button:active { transform: translateY(1px); }
   font-family: Arial, Helvetica, sans-serif;
   box-shadow: 0 12px 40px rgba(35, 21, 28, .14);
 }
-.invoice-header { display: grid; grid-template-columns: 1fr 1.25fr .9fr; gap: 22px; align-items: start; border-bottom: 1px solid #d9d2d2; padding-bottom: 24px; }
-.invoice-payment-options { display: grid; gap: 8px; padding-top: 4px; font-size: 12px; }
-.invoice-payment-options span { display: flex; align-items: center; gap: 7px; }
-.invoice-checkbox { display: inline-flex; width: 14px; height: 14px; align-items: center; justify-content: center; border: 1px solid #8d7c83; font-size: 11px; line-height: 1; }
-.invoice-payment-options .selected { font-weight: 700; }
+.invoice-header { display: grid; grid-template-columns: auto 1fr 1.25fr .9fr; gap: 22px; align-items: start; border-bottom: 1px solid #d9d2d2; padding-bottom: 24px; }
+.invoice-logo { display: flex; align-items: flex-start; }
+.invoice-logo img { max-height: 70px; width: auto; object-fit: contain; }
 .invoice-company { display: grid; gap: 3px; font-size: 11px; line-height: 1.35; white-space: pre-line; }
 .invoice-company strong { margin-bottom: 5px; font-size: 14px; }
 .invoice-meta { text-align: right; }

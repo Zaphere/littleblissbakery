@@ -21,21 +21,14 @@ export function InvoiceDocument({ order, products, settings }: InvoiceDocumentPr
   const taxable = subtotal - order.discount + order.deliveryFee;
   const tax = taxable * ((order.taxRate || 0) / 100);
   const total = taxable + tax;
-  const paymentLabel = order.paymentMethod || 'Cash';
-  const selectedPayment = ['Cash', 'Check', 'Credit', 'Other'].includes(paymentLabel) ? paymentLabel : 'Other';
   const productName = (productId: string) =>
     products.find((product) => product.id === productId)?.name || 'Product';
 
   return (
     <article className="printable-invoice invoice-paper" aria-label={`${order.invoiceNumber} invoice`}>
       <header className="invoice-header">
-        <div className="invoice-payment-options" aria-label="Payment method">
-          {['Cash', 'Check', 'Credit', 'Other'].map((method) => (
-            <span key={method} className={selectedPayment === method ? 'selected' : ''}>
-              <span className="invoice-checkbox">{selectedPayment === method ? '✓' : ''}</span>
-              {method}
-            </span>
-          ))}
+        <div className="invoice-logo">
+          <img src="/little-bliss-logo.jpg" alt="Little Bliss Bakery" className="h-16 w-auto object-contain" />
         </div>
         <div className="invoice-company">
           <strong>{settings.bakeryName || 'Little Bliss Bakery'}</strong>

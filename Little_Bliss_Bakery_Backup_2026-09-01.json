@@ -1,0 +1,573 @@
+{
+  "currency": "E",
+  "ingredients": [
+    {
+      "id": 1,
+      "name": "Baker's Pride Flour",
+      "category": "Flour",
+      "supplier": "Current bakery supplier",
+      "packSize": 10000,
+      "unit": "g",
+      "price": 157,
+      "costPerUnit": 0.0157,
+      "updatedAt": "2026-09-01T08:37:41.605Z"
+    },
+    {
+      "id": 2,
+      "name": "Sunshine Original Margarine",
+      "category": "Fats",
+      "supplier": "Shoprite",
+      "packSize": 500,
+      "unit": "g",
+      "price": 21,
+      "costPerUnit": 0.042,
+      "updatedAt": "2026-09-01T08:37:41.606Z"
+    },
+    {
+      "id": 3,
+      "name": "Caster Sugar",
+      "category": "Sugar",
+      "supplier": "Shoprite",
+      "packSize": 500,
+      "unit": "g",
+      "price": 34.99,
+      "costPerUnit": 0.06998,
+      "updatedAt": "2026-09-01T08:37:41.606Z"
+    },
+    {
+      "id": 4,
+      "name": "Icing Sugar",
+      "category": "Sugar",
+      "supplier": "Shoprite",
+      "packSize": 500,
+      "unit": "g",
+      "price": 34.99,
+      "costPerUnit": 0.06998,
+      "updatedAt": "2026-09-01T08:37:41.606Z"
+    },
+    {
+      "id": 5,
+      "name": "Royal Baking Powder",
+      "category": "Leavening",
+      "supplier": "SPAR",
+      "packSize": 200,
+      "unit": "g",
+      "price": 38,
+      "costPerUnit": 0.19,
+      "updatedAt": "2026-09-01T08:37:41.606Z"
+    },
+    {
+      "id": 6,
+      "name": "Bicarbonate of Soda",
+      "category": "Leavening",
+      "supplier": "SPAR",
+      "packSize": 200,
+      "unit": "g",
+      "price": 38,
+      "costPerUnit": 0.19,
+      "updatedAt": "2026-09-01T08:37:41.606Z"
+    },
+    {
+      "id": 7,
+      "name": "Safari Raisins",
+      "category": "Dried Fruit",
+      "supplier": "SPAR",
+      "packSize": 1000,
+      "unit": "g",
+      "price": 95,
+      "costPerUnit": 0.095,
+      "updatedAt": "2026-09-01T08:37:41.606Z"
+    },
+    {
+      "id": 8,
+      "name": "Chocolate Chips",
+      "category": "Chocolate",
+      "supplier": "Baking Co",
+      "packSize": 1000,
+      "unit": "g",
+      "price": 100,
+      "costPerUnit": 0.1,
+      "updatedAt": "2026-09-01T08:37:41.606Z"
+    },
+    {
+      "id": 9,
+      "name": "AG Jam",
+      "category": "Preserves",
+      "supplier": "SPAR",
+      "packSize": 900,
+      "unit": "g",
+      "price": 100,
+      "costPerUnit": 0.1111,
+      "updatedAt": "2026-09-01T08:37:41.606Z"
+    },
+    {
+      "id": 10,
+      "name": "Butter",
+      "category": "Fats",
+      "supplier": "Shoprite",
+      "packSize": 500,
+      "unit": "g",
+      "price": 0,
+      "costPerUnit": 0,
+      "updatedAt": "2026-09-01T08:37:41.606Z"
+    },
+    {
+      "id": 11,
+      "name": "Eggs",
+      "category": "Dairy",
+      "supplier": "Local Farm",
+      "packSize": 30,
+      "unit": "unit",
+      "price": 0,
+      "costPerUnit": 0,
+      "updatedAt": "2026-09-01T08:37:41.606Z"
+    },
+    {
+      "id": 12,
+      "name": "Vanilla Essence",
+      "category": "Extracts",
+      "supplier": "SPAR",
+      "packSize": 100,
+      "unit": "ml",
+      "price": 0,
+      "costPerUnit": 0,
+      "updatedAt": "2026-09-01T08:37:41.606Z"
+    },
+    {
+      "id": 13,
+      "name": "Oats",
+      "category": "Grains",
+      "supplier": "Shoprite",
+      "packSize": 1000,
+      "unit": "g",
+      "price": 0,
+      "costPerUnit": 0,
+      "updatedAt": "2026-09-01T08:37:41.606Z"
+    },
+    {
+      "id": 14,
+      "name": "Salt",
+      "category": "Spices",
+      "supplier": "Shoprite",
+      "packSize": 500,
+      "unit": "g",
+      "price": 10,
+      "costPerUnit": 0.02,
+      "updatedAt": "2026-09-01T08:37:41.606Z"
+    },
+    {
+      "id": 15,
+      "name": "Cinnamon",
+      "category": "Spices",
+      "supplier": "SPAR",
+      "packSize": 100,
+      "unit": "g",
+      "price": 0,
+      "costPerUnit": 0,
+      "updatedAt": "2026-09-01T08:37:41.606Z"
+    },
+    {
+      "id": 16,
+      "name": "Nutmeg",
+      "category": "Spices",
+      "supplier": "SPAR",
+      "packSize": 100,
+      "unit": "g",
+      "price": 0,
+      "costPerUnit": 0,
+      "updatedAt": "2026-09-01T08:37:41.606Z"
+    },
+    {
+      "id": 17,
+      "name": "Cornflour",
+      "category": "Thickeners",
+      "supplier": "Shoprite",
+      "packSize": 500,
+      "unit": "g",
+      "price": 34,
+      "costPerUnit": 0.068,
+      "updatedAt": "2026-09-01T08:59:04.768Z"
+    },
+    {
+      "id": 18,
+      "name": "Cooking Oil / Spray",
+      "category": "Fats",
+      "supplier": "Shoprite",
+      "packSize": 750,
+      "unit": "ml",
+      "price": 234,
+      "costPerUnit": 0.312,
+      "updatedAt": "2026-09-01T08:59:13.391Z"
+    }
+  ],
+  "products": [
+    {
+      "id": 1,
+      "name": "Oat & Raisin Cookies",
+      "category": "Cookies",
+      "description": "Soft, chewy oat & raisin classic cookies.",
+      "retailPricePerDozen": 180,
+      "laborCostPerBatch": 15,
+      "energyCostPerBatch": 10,
+      "packagingCostPerBatch": 5,
+      "wastagePercent": 5,
+      "isActive": true
+    },
+    {
+      "id": 2,
+      "name": "Chocolate Chip Cookies",
+      "category": "Cookies",
+      "description": "Golden cookies packed with chocolate chips.",
+      "retailPricePerDozen": 180,
+      "laborCostPerBatch": 15,
+      "energyCostPerBatch": 10,
+      "packagingCostPerBatch": 5,
+      "wastagePercent": 5,
+      "isActive": true
+    },
+    {
+      "id": 3,
+      "name": "Dark Chocolate Chip Cookies",
+      "category": "Cookies",
+      "description": "Decadent dark cocoa & choc chip cookies.",
+      "retailPricePerDozen": 180,
+      "laborCostPerBatch": 15,
+      "energyCostPerBatch": 10,
+      "packagingCostPerBatch": 5,
+      "wastagePercent": 5,
+      "isActive": true
+    },
+    {
+      "id": 4,
+      "name": "Jam Tarts",
+      "category": "Tarts",
+      "description": "Sweet golden pastry tarts filled with sweet AG jam.",
+      "retailPricePerDozen": 200,
+      "laborCostPerBatch": 20,
+      "energyCostPerBatch": 12,
+      "packagingCostPerBatch": 8,
+      "wastagePercent": 5,
+      "isActive": true
+    },
+    {
+      "id": 5,
+      "name": "Oatmeal Pies",
+      "category": "Pies",
+      "description": "Spiced oatmeal sandwich pies with rich cream filling.",
+      "retailPricePerDozen": 250,
+      "laborCostPerBatch": 25,
+      "energyCostPerBatch": 15,
+      "packagingCostPerBatch": 10,
+      "wastagePercent": 5,
+      "isActive": true
+    }
+  ],
+  "recipes": [
+    {
+      "id": 1,
+      "productId": 1,
+      "yieldCount": 30,
+      "doughWeightGrams": 65,
+      "finishedWeightGrams": 55,
+      "items": [
+        {
+          "ingredientId": 2,
+          "quantity": 250,
+          "unit": "g"
+        },
+        {
+          "ingredientId": 3,
+          "quantity": 400,
+          "unit": "g"
+        },
+        {
+          "ingredientId": 12,
+          "quantity": 15,
+          "unit": "ml"
+        },
+        {
+          "ingredientId": 11,
+          "quantity": 3,
+          "unit": "unit"
+        },
+        {
+          "ingredientId": 1,
+          "quantity": 450,
+          "unit": "g"
+        },
+        {
+          "ingredientId": 6,
+          "quantity": 8,
+          "unit": "g"
+        },
+        {
+          "ingredientId": 5,
+          "quantity": 5,
+          "unit": "g"
+        },
+        {
+          "ingredientId": 14,
+          "quantity": 5,
+          "unit": "g"
+        },
+        {
+          "ingredientId": 7,
+          "quantity": 250,
+          "unit": "g"
+        },
+        {
+          "ingredientId": 13,
+          "quantity": 450,
+          "unit": "g"
+        },
+        {
+          "ingredientId": 15,
+          "quantity": 5,
+          "unit": "g"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "productId": 2,
+      "yieldCount": 30,
+      "doughWeightGrams": 55,
+      "finishedWeightGrams": 50,
+      "items": [
+        {
+          "ingredientId": 2,
+          "quantity": 250,
+          "unit": "g"
+        },
+        {
+          "ingredientId": 3,
+          "quantity": 250,
+          "unit": "g"
+        },
+        {
+          "ingredientId": 11,
+          "quantity": 3,
+          "unit": "unit"
+        },
+        {
+          "ingredientId": 1,
+          "quantity": 500,
+          "unit": "g"
+        },
+        {
+          "ingredientId": 6,
+          "quantity": 10,
+          "unit": "g"
+        },
+        {
+          "ingredientId": 14,
+          "quantity": 10,
+          "unit": "g"
+        },
+        {
+          "ingredientId": 8,
+          "quantity": 300,
+          "unit": "g"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "productId": 4,
+      "yieldCount": 15,
+      "doughWeightGrams": 45,
+      "finishedWeightGrams": 40,
+      "items": [
+        {
+          "ingredientId": 10,
+          "quantity": 85,
+          "unit": "g"
+        },
+        {
+          "ingredientId": 3,
+          "quantity": 110,
+          "unit": "g"
+        },
+        {
+          "ingredientId": 11,
+          "quantity": 1,
+          "unit": "unit"
+        },
+        {
+          "ingredientId": 1,
+          "quantity": 150,
+          "unit": "g"
+        },
+        {
+          "ingredientId": 17,
+          "quantity": 90,
+          "unit": "g"
+        },
+        {
+          "ingredientId": 5,
+          "quantity": 5,
+          "unit": "g"
+        },
+        {
+          "ingredientId": 9,
+          "quantity": 400,
+          "unit": "g"
+        }
+      ]
+    }
+  ],
+  "orders": [
+    {
+      "id": 1,
+      "orderNumber": "LBB-1001",
+      "customerName": "Nokwanda Dlamini",
+      "customerPhone": "+268 7612 3456",
+      "orderDate": "2026-08-30",
+      "dueDate": "2026-08-31",
+      "items": [
+        {
+          "productId": 1,
+          "productName": "Oat & Raisin Cookies",
+          "quantityDozen": 2,
+          "pricePerDozen": 180,
+          "costPerDozenSnapshot": 65.4
+        },
+        {
+          "productId": 2,
+          "productName": "Chocolate Chip Cookies",
+          "quantityDozen": 1,
+          "pricePerDozen": 180,
+          "costPerDozenSnapshot": 62.1
+        }
+      ],
+      "discount": 0,
+      "deliveryFee": 30,
+      "totalRevenue": 570,
+      "totalCostSnapshot": 192.9,
+      "amountPaid": 570,
+      "paymentStatus": "Paid",
+      "paymentMethod": "Mobile Money",
+      "notes": "Deliver to Mbabane center"
+    },
+    {
+      "id": 2,
+      "orderNumber": "LBB-1002",
+      "customerName": "Sibusiso Simelane",
+      "customerPhone": "+268 7890 1122",
+      "orderDate": "2026-09-01",
+      "dueDate": "2026-09-03",
+      "items": [
+        {
+          "productId": 4,
+          "productName": "Jam Tarts",
+          "quantityDozen": 3,
+          "pricePerDozen": 200,
+          "costPerDozenSnapshot": 78.5
+        }
+      ],
+      "discount": 20,
+      "deliveryFee": 0,
+      "totalRevenue": 580,
+      "totalCostSnapshot": 235.5,
+      "amountPaid": 300,
+      "paymentStatus": "Deposit Paid",
+      "paymentMethod": "EFT",
+      "notes": "Birthday party package"
+    },
+    {
+      "id": 3,
+      "orderNumber": "LBB-1003",
+      "customerName": "Mabudha",
+      "customerPhone": "7655456",
+      "orderDate": "2026-09-01",
+      "dueDate": "2026-09-01",
+      "items": [
+        {
+          "productId": 1,
+          "productName": "Oat & Raisin Cookies",
+          "quantityDozen": 3,
+          "pricePerDozen": 180,
+          "costPerDozenSnapshot": 42.788340000000005
+        },
+        {
+          "productId": 2,
+          "productName": "Chocolate Chip Cookies",
+          "quantityDozen": 2,
+          "pricePerDozen": 180,
+          "costPerDozenSnapshot": 41.1369
+        }
+      ],
+      "discount": 0,
+      "deliveryFee": 0,
+      "totalRevenue": 900,
+      "totalCostSnapshot": 210.63882,
+      "amountPaid": 0,
+      "paymentStatus": "Unpaid",
+      "paymentMethod": "EFT"
+    }
+  ],
+  "expenses": [
+    {
+      "id": 1,
+      "date": "2026-08-29",
+      "category": "Ingredients Purchase",
+      "description": "Bulk Flour 10kg & Margarine 500g",
+      "amount": 178,
+      "supplier": "Shoprite"
+    },
+    {
+      "id": 2,
+      "date": "2026-08-31",
+      "category": "Packaging",
+      "description": "Bakery boxes and sticker sheets",
+      "amount": 120,
+      "supplier": "Local Print"
+    },
+    {
+      "id": 3,
+      "date": "2026-09-01",
+      "category": "Ingredients Purchase",
+      "description": "cvbvcbcvbcvbc",
+      "amount": 45
+    }
+  ],
+  "inventory": [
+    {
+      "ingredientId": 1,
+      "currentStock": 8500,
+      "minStockLevel": 2000
+    },
+    {
+      "ingredientId": 2,
+      "currentStock": 1200,
+      "minStockLevel": 500
+    },
+    {
+      "ingredientId": 3,
+      "currentStock": 1500,
+      "minStockLevel": 500
+    },
+    {
+      "ingredientId": 7,
+      "currentStock": 800,
+      "minStockLevel": 300
+    },
+    {
+      "ingredientId": 8,
+      "currentStock": 2500,
+      "minStockLevel": 1000
+    },
+    {
+      "ingredientId": 9,
+      "currentStock": 1800,
+      "minStockLevel": 500
+    }
+  ],
+  "settings": {
+    "bakeryName": "Little Bliss Bakery",
+    "phone": "+268 7600 0000",
+    "email": "hello@littleblissbakery.sz",
+    "address": "Manzini, Eswatini",
+    "currencySymbol": "E"
+  }
+}
