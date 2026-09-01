@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Route, Switch, Link, useLocation } from 'wouter';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Archive, ArrowDownRight, ArrowUpRight, Banknote, BarChart3, BookOpen, Box, CalendarDays, Check, ChevronRight,
+  Archive, ArrowDownRight, ArrowUpRight, Banknote, BarChart3, BookOpen, Box, CalendarDays, Check, ChevronRight, ClipboardList,
   CircleAlert, CircleDollarSign, Download, FileText, Grape, LayoutDashboard, Menu, Package,
   Pencil, Plus, Receipt, RefreshCw, Search, Settings as SettingsIcon, Sparkles,
   Trash2, TrendingUp, Upload, Wallet, X, SlidersHorizontal,
