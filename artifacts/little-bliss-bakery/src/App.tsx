@@ -444,43 +444,7 @@ function Orders() {
 
 }
 function BakingReport({ order, store, onClose }: { order: Order; store: Store; onClose: () => void }) {
-  const orderTotal = order.items.reduce((a, i) => a + i.quantity * i.unitPrice, 0) - order.discount + order.deliveryFee;
-  const orderCost = order.items.reduce((a, i) => a + i.quantity * i.costSnapshot, 0);
-  const usage = ingredientUsageForOrder(order, store.recipes, store.products, store.ingredients);
-  const linkedExpenses = store.expenses.filter(e => e.relatedOrderId === order.id);
-  const totalExpenses = linkedExpenses.reduce((s, e) => s + e.amount, 0);
-  const profit = orderTotal - orderCost - totalExpenses;
-  const perProduct = order.items.map(item => {
-    const product = store.products.find(p => p.id === item.productId);
-    const recipe = store.recipes.find(r => r.productId === item.productId);
-    const batches = product ? item.quantity / product.batchYield : 0;
-    const ingredients = recipe ? recipe.ingredients.map(row => {
-      const ing = store.ingredients.find(i => i.id === row.ingredientId);
-      const usedQty = row.quantity * batches;
-      const unitPrice = ing ? unitCost(ing) : null;
-      return { name: ing?.name || 'Unknown', unit: row.unit, usedQty, currentStock: ing?.currentStock || 0, remaining: Math.max(0, (ing?.currentStock || 0) - usedQty), cost: unitPrice !== null ? unitPrice * usedQty : null };
-    }) : [];
-    const batchCost = recipe ? costOfRecipe(recipe, store.ingredients) : 0;
-    return { product, quantity: item.quantity, unitPrice: item.unitPrice, batches, ingredients, batchCost, lineCost: item.quantity * item.costSnapshot, lineRevenue: item.quantity * item.unitPrice };
-  });
-  return <Modal title="Baking Report" subtitle={`${order.invoiceNumber} — ${order.customerName}`} onClose={onClose} wide>
-    <div className="space-y-5 max-h-[70vh] overflow-y-auto pr-1">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div className="rounded-lg bg-muted/50 p-3"><p className="text-[10px] text-muted-foreground">Order Total</p><p className="mono text-sm font-semibold">{money(orderTotal)}</p></div>
-        <div className="rounded-lg bg-muted/50 p-3"><p className="text-[10px] text-muted-foreground">Ingredient Cost</p><p className="mono text-sm font-semibold">{money(orderCost)}</p></div>
-        <div className="rounded-lg bg-muted/50 p-3"><p className="text-[10px] text-muted-foreground">Expenses</p><p className="mono text-sm font-semibold">{money(totalExpenses)}</p></div>
-        <div className="rounded-lg bg-muted/50 p-3"><p className="text-[10px] text-muted-foreground">Profit</p><p className={cx('mono text-sm font-semibold', profit >= 0 ? 'text-primary' : 'text-destructive')}>{money(profit)}</p></div>
-      </div>
-      {perProduct.map((pp, idx) => <div key={idx} className="rounded-lg border p-4">
-        <div className="mb-3 flex items-center justify-between"><div><p className="text-sm font-semibold">{pp.product?.name || 'Unknown product'}</p><p className="text-[10px] text-muted-foreground">{pp.quantity} units · {pp.batches.toFixed(1)} batches · {money(pp.unitPrice)} each</p></div><div className="text-right"><p className="text-[10px] text-muted-foreground">Revenue</p><p className="mono text-sm font-semibold">{money(pp.lineRevenue)}</p></div></div>
-        {pp.ingredients.length > 0 ? <table className="w-full text-xs"><thead className="text-muted-foreground"><tr><th className="pb-1 text-left font-medium">Ingredient</th><th className="pb-1 text-right font-medium">Used</th><th className="pb-1 text-right font-medium">Left</th><th className="pb-1 text-right font-medium">Cost</th></tr></thead><tbody className="divide-y">{pp.ingredients.map((ing, j) => <tr key={j}><td className="py-1">{ing.name}</td><td className="py-1 text-right mono">{ing.usedQty.toFixed(0)}{ing.unit}</td><td className={cx('py-1 text-right mono', ing.remaining <= 0 && 'text-destructive', ing.remaining > 0 && ing.remaining < ing.usedQty && 'text-primary')}>{ing.remaining.toFixed(0)}{ing.unit}</td><td className="py-1 text-right mono">{ing.cost !== null ? money(ing.cost) : '—'}</td></tr>)}</tbody></table> : <p className="text-xs text-muted-foreground">No recipe linked</p>}
-        <div className="mt-2 flex justify-end border-t pt-2"><span className="text-xs text-muted-foreground">Batch cost: <span className="mono font-semibold">{money(pp.batchCost)}</span></span></div>
-      </div>)}
-      {linkedExpenses.length > 0 && <div><p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Linked Expenses</p><div className="rounded-lg border divide-y">{linkedExpenses.map(e => <div key={e.id} className="flex items-center justify-between px-3 py-2"><div><p className="text-xs font-medium">{e.description}</p><p className="text-[10px] text-muted-foreground">{e.category} · {shortDate(e.date)}</p></div><span className="mono text-xs font-semibold">{money(e.amount)}</span></div>)}</div></div>}
-      <div className="rounded-lg bg-muted/30 p-4"><p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Ingredient Stock Summary</p><table className="w-full text-xs"><thead className="text-muted-foreground"><tr><th className="pb-1 text-left font-medium">Ingredient</th><th className="pb-1 text-right font-medium">Before</th><th className="pb-1 text-right font-medium">Used</th><th className="pb-1 text-right font-medium">After</th><th className="pb-1 text-right font-medium">Status</th></tr></thead><tbody className="divide-y">{store.ingredients.filter(i => usage[i.id] > 0).map(i => { const remaining = i.currentStock - usage[i.id]; const pct = i.currentStock > 0 ? remaining / i.currentStock : 0; return <tr key={i.id}><td className="py-1">{i.name}</td><td className="py-1 text-right mono">{i.currentStock}{i.unit}</td><td className="py-1 text-right mono text-primary">-{usage[i.id].toFixed(0)}{i.unit}</td><td className="py-1 text-right mono">{remaining.toFixed(0)}{i.unit}</td><td className="py-1 text-right"><span className={cx('rounded-full px-1.5 py-0.5 text-[10px] font-semibold', remaining <= 0 ? 'bg-destructive/15 text-destructive' : pct < 0.3 ? 'bg-primary/15 text-primary' : 'bg-secondary text-secondary-foreground')}>{remaining <= 0 ? 'Out' : pct < 0.3 ? 'Low' : 'OK'}</span></td></tr>; })}</tbody></table></div>
-    </div>
-    <div className="mt-4 flex justify-end"><Button variant="soft" onClick={() => window.print()}>Print Report</Button></div>
-  </Modal>;
+  return createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Baking report</p><h2 className="display text-2xl font-semibold">{order.invoiceNumber}</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={onClose}>Close</Button><Button onClick={() => window.print()}><FileText size={16} /> Print or save PDF</Button></div></div><BakingReportDocument order={order} store={store} /></div></div>, document.body);
 }
 function OrderModal({ value, store, onClose, onSave }: { value: Order; store: Store; onClose: () => void; onSave: (v: Order) => void }) {
   const [o, setO] = useState(value); const [pasteText, setPasteText] = useState(''); const [showPaste, setShowPaste] = useState(!value.customerName); const [expandedItem, setExpandedItem] = useState<number | null>(0); const total = o.items.reduce((a, i) => a + i.quantity * i.unitPrice, 0) - o.discount + o.deliveryFee; const set = (k: keyof Order, v: string | number) => setO(x => ({ ...x, [k]: v }));
