@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, createContext, useContext, type ReactNode, type FormEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { Route, Switch, Link, useLocation } from 'wouter';
 import { motion } from 'framer-motion';
 import {
@@ -7,7 +8,8 @@ import {
   Pencil, Plus, Receipt, RefreshCw, Search, Settings as SettingsIcon, Sparkles,
   Trash2, TrendingUp, Upload, Wallet, X, SlidersHorizontal
 } from 'lucide-react';
-import { loadStore, saveStore, resetStore, unitCost, costOfRecipe, today, type Store, type Ingredient, type Product, type Recipe, type Order, type Expense, type InventoryTransaction, type BudgetAllocation } from '@/lib/store';
+import { InvoiceDocument } from '@/components/invoice-document';
+import { formatInvoiceNumber, getNextInvoiceNumber, loadStore, saveStore, resetStore, unitCost, costOfRecipe, today, type Store, type Ingredient, type Product, type Recipe, type Order, type Expense, type InventoryTransaction, type BudgetAllocation } from '@/lib/store';
 import '@/index.css';
 
 const StoreContext = createContext<{ store: Store; update: (patch: Partial<Store>) => void }>({ store: loadStore(), update: () => undefined });
@@ -106,7 +108,7 @@ function Metric({ label, value, trend, note, icon: Icon, tone }: { label: string
 function Quick({ href, icon: Icon, label }: { href: string; icon: typeof Receipt; label: string }) { return <Link href={href} className="flex items-center gap-2 rounded-lg border px-3 py-2.5 text-xs font-semibold hover:border-primary hover:bg-primary/5"><Icon size={15} className="text-primary" />{label}</Link>; }
 function OrderRow({ order, store }: { order: Order; store: Store }) {
   const total = order.items.reduce((a, i) => a + i.quantity * i.unitPrice, 0) - order.discount + order.deliveryFee;
-  return <div className="flex items-center justify-between gap-3 px-5 py-4"><div className="flex min-w-0 items-center gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-bold text-secondary-foreground">{order.customerName.split(' ').map(x => x[0]).join('').slice(0, 2)}</span><div className="min-w-0"><p className="truncate text-sm font-semibold">{order.customerName}</p><p className="text-xs text-muted-foreground">{order.orderNumber} · {order.items.map(i => `${i.quantity} × ${store.products.find(p => p.id === i.productId)?.name}`).join(', ')}</p></div></div><div className="text-right"><p className="mono text-sm font-semibold">{money(total)}</p><Status status={order.paymentStatus} /></div></div>;
+  return <div className="flex items-center justify-between gap-3 px-5 py-4"><div className="flex min-w-0 items-center gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-bold text-secondary-foreground">{order.customerName.split(' ').map(x => x[0]).join('').slice(0, 2)}</span><div className="min-w-0"><p className="truncate text-sm font-semibold">{order.customerName}</p><p className="text-xs text-muted-foreground">{order.invoiceNumber} · {order.items.map(i => `${i.quantity} × ${store.products.find(p => p.id === i.productId)?.name}`).join(', ')}</p></div></div><div className="text-right"><p className="mono text-sm font-semibold">{money(total)}</p><Status status={order.paymentStatus} /></div></div>;
 }
 function Status({ status }: { status: string }) { return <span className={cx('mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold', status === 'Paid' ? 'bg-secondary text-secondary-foreground' : status === 'Part paid' ? 'bg-accent/50 text-foreground' : 'bg-muted text-muted-foreground')}>{status}</span>; }
 
@@ -142,17 +144,98 @@ function RecipeModal({ value, ingredients, onClose, onSave }: { value: Recipe; i
 }
 
 function Orders() {
-  const { store, update } = useStore(); const [edit, setEdit] = useState<Order | null>(null); const [search, setSearch] = useState(''); const [location] = useLocation();
-  const rows = store.orders.filter(o => `${o.customerName} ${o.orderNumber}`.toLowerCase().includes(search.toLowerCase()));
-  const newOrder = () => setEdit({ id: id('order'), orderNumber: `LB-${1043 + store.orders.length}`, customerName: '', phone: '', orderDate: today(), dueDate: today(), items: [{ productId: store.products[0]?.id || '', quantity: 1, unitPrice: store.products[0]?.retailPriceDozen || 0, costSnapshot: 0 }], discount: 0, deliveryFee: 0, paymentStatus: 'Unpaid', paymentMethod: 'Cash', amountPaid: 0, payments: [], notes: '', createdAt: new Date().toISOString() });
-  useEffect(() => { if (location.includes('?new=1')) newOrder(); }, [location]);
-  return <div><PageHeader eyebrow="Sales desk" title="Orders" description="A clear queue from first message to paid-in-full." action={<Button data-testid="button-add-order" onClick={newOrder}><Plus size={17} /> New order</Button>} /><div className="mb-4 flex items-center gap-3"><div className="relative max-w-sm flex-1"><Search className="absolute left-3 top-3 text-muted-foreground" size={16} /><Input data-testid="input-search-orders" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search customer or order no." className="pl-9" /></div><span className="hidden text-xs text-muted-foreground sm:block">{rows.length} visible orders</span></div><Card className="overflow-hidden">{rows.length ? <div className="overflow-x-auto"><table className="w-full min-w-[830px] text-left text-sm"><thead className="bg-muted/55 text-xs uppercase tracking-wider text-muted-foreground"><tr><th className="px-5 py-3.5">Order</th><th>Due</th><th>Total</th><th>Paid</th><th>Outstanding</th><th>Status</th><th className="pr-5 text-right"> </th></tr></thead><tbody className="divide-y">{rows.map(o => { const total = o.items.reduce((a, i) => a + i.quantity * i.unitPrice, 0) - o.discount + o.deliveryFee; return <tr key={o.id} className="hover:bg-muted/25"><td className="px-5 py-4"><p className="font-semibold">{o.orderNumber}</p><p className="text-xs text-muted-foreground">{o.customerName} · {o.phone || 'no phone'}</p></td><td><span className={cx(o.dueDate < today() && o.paymentStatus !== 'Paid' && 'text-destructive')}>{shortDate(o.dueDate)}</span></td><td className="mono">{money(total)}</td><td className="mono">{money(o.amountPaid)}</td><td className="mono text-primary">{money(Math.max(0, total - o.amountPaid))}</td><td><Status status={o.paymentStatus} /></td><td className="pr-5 text-right"><IconButton label={`Edit ${o.orderNumber}`} onClick={() => setEdit(o)}><Pencil size={16} /></IconButton></td></tr>; })}</tbody></table></div> : <Empty icon={Receipt} title="Your order board is clear" detail="Record your first customer order and it will stay here offline." action={<Button onClick={newOrder}><Plus size={16} /> Add order</Button>} />}</Card>{edit && <OrderModal value={edit} store={store} onClose={() => setEdit(null)} onSave={o => { const exists = store.orders.some(x => x.id === o.id); update({ orders: exists ? store.orders.map(x => x.id === o.id ? o : x) : [o, ...store.orders] }); setEdit(null); }} />}</div>;
+  const { store, update } = useStore();
+  const [edit, setEdit] = useState<Order | null>(null);
+  const [invoice, setInvoice] = useState<Order | null>(null);
+  const [search, setSearch] = useState('');
+  const [location] = useLocation();
+  const rows = store.orders.filter(o => `${o.customerName} ${o.invoiceNumber} ${o.orderNumber}`.toLowerCase().includes(search.toLowerCase()));
+  const newOrder = () => setEdit({
+    id: id('order'),
+    invoiceNumber: formatInvoiceNumber(getNextInvoiceNumber(store)),
+    orderNumber: '',
+    customerName: '',
+    customerAddress: '',
+    customerCity: '',
+    phone: '',
+    orderDate: today(),
+    dueDate: today(),
+    salesRep: '',
+    code: '',
+    fob: '',
+    taxRate: 0,
+    items: [{ productId: store.products[0]?.id || '', quantity: 1, unitPrice: store.products[0]?.retailPriceDozen || 0, costSnapshot: 0 }],
+    discount: 0,
+    deliveryFee: 0,
+    paymentStatus: 'Unpaid',
+    paymentMethod: 'Cash',
+    amountPaid: 0,
+    payments: [],
+    notes: '',
+    createdAt: new Date().toISOString(),
+  });
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('new') === '1') newOrder();
+    const invoiceId = params.get('invoice');
+    const selected = invoiceId ? store.orders.find(order => order.id === invoiceId) : undefined;
+    if (selected) setInvoice(selected);
+  }, [location]);
+  const saveOrder = (order: Order) => {
+    const exists = store.orders.some(x => x.id === order.id);
+    update({
+      orders: exists ? store.orders.map(x => x.id === order.id ? order : x) : [order, ...store.orders],
+      settings: { ...store.settings, nextInvoiceNumber: exists ? store.settings.nextInvoiceNumber : getNextInvoiceNumber(store) + 1 },
+    });
+    setEdit(null);
+  };
+  return <div><PageHeader eyebrow="Sales desk" title="Orders" description="Create invoices with the same clean sequence as your Excel book." action={<Button data-testid="button-add-order" onClick={newOrder}><Plus size={17} /> New invoice</Button>} /><div className="mb-4 flex items-center gap-3"><div className="relative max-w-sm flex-1"><Search className="absolute left-3 top-3 text-muted-foreground" size={16} /><Input data-testid="input-search-orders" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search customer or invoice no." className="pl-9" /></div><span className="hidden text-xs text-muted-foreground sm:block">{rows.length} visible invoices</span></div><Card className="overflow-hidden">{rows.length ? <div className="overflow-x-auto"><table className="w-full min-w-[890px] text-left text-sm"><thead className="bg-muted/55 text-xs uppercase tracking-wider text-muted-foreground"><tr><th className="px-5 py-3.5">Invoice</th><th>Due</th><th>Total</th><th>Paid</th><th>Outstanding</th><th>Status</th><th className="pr-5 text-right"> </th></tr></thead><tbody className="divide-y">{rows.map(o => { const total = o.items.reduce((a, i) => a + i.quantity * i.unitPrice, 0) - o.discount + o.deliveryFee; return <tr key={o.id} className="hover:bg-muted/25"><td className="px-5 py-4"><p className="font-semibold">{o.invoiceNumber}</p><p className="text-xs text-muted-foreground">{o.customerName} · {o.phone || 'no phone'}</p></td><td><span className={cx(o.dueDate < today() && o.paymentStatus !== 'Paid' && 'text-destructive')}>{shortDate(o.dueDate)}</span></td><td className="mono">{money(total)}</td><td className="mono">{money(o.amountPaid)}</td><td className="mono text-primary">{money(Math.max(0, total - o.amountPaid))}</td><td><Status status={o.paymentStatus} /></td><td className="pr-5 text-right"><IconButton label={`Preview ${o.invoiceNumber}`} onClick={() => setInvoice(o)}><FileText size={16} /></IconButton><IconButton label={`Edit ${o.invoiceNumber}`} onClick={() => setEdit(o)}><Pencil size={16} /></IconButton></td></tr>; })}</tbody></table></div> : <Empty icon={Receipt} title="Your invoice book is clear" detail="Record your first customer invoice and it will stay here offline." action={<Button onClick={newOrder}><Plus size={16} /> Add invoice</Button>} />}</Card>{edit && <InvoiceOrderModal value={edit} store={store} onClose={() => setEdit(null)} onSave={saveOrder} />}{invoice && <InvoicePreview order={invoice} store={store} onClose={() => setInvoice(null)} />}</div>;
 }
 function OrderModal({ value, store, onClose, onSave }: { value: Order; store: Store; onClose: () => void; onSave: (v: Order) => void }) {
   const [o, setO] = useState(value); const total = o.items.reduce((a, i) => a + i.quantity * i.unitPrice, 0) - o.discount + o.deliveryFee; const set = (k: keyof Order, v: string | number) => setO(x => ({ ...x, [k]: v }));
   const snapshot = (item: Order['items'][number]) => { const p = store.products.find(x => x.id === item.productId); const r = store.recipes.find(x => x.productId === item.productId); return r && p ? costOfRecipe(r, store.ingredients) * (p.batchYield / r.batchYield) : item.costSnapshot; };
   const updateItem = (idx: number, key: string, val: string | number) => setO(x => ({ ...x, items: x.items.map((row, i) => i === idx ? { ...row, [key]: val } : row) }));
   return <Modal title={value.customerName ? `Edit ${value.orderNumber}` : 'New customer order'} subtitle="Save a price snapshot so this order stays historically accurate." onClose={onClose} wide><form onSubmit={e => { e.preventDefault(); onSave({ ...o, items: o.items.map(item => ({ ...item, costSnapshot: snapshot(item) })) }); }}><div className="grid gap-4 sm:grid-cols-3"><Field label="Customer name"><Input required value={o.customerName} onChange={e => set('customerName', e.target.value)} /></Field><Field label="Phone"><Input value={o.phone} onChange={e => set('phone', e.target.value)} /></Field><Field label="Order number"><Input value={o.orderNumber} onChange={e => set('orderNumber', e.target.value)} /></Field><Field label="Order date"><Input type="date" value={o.orderDate} onChange={e => set('orderDate', e.target.value)} /></Field><Field label="Due date"><Input type="date" value={o.dueDate} onChange={e => set('dueDate', e.target.value)} /></Field><Field label="Payment status"><Select value={o.paymentStatus} onChange={e => set('paymentStatus', e.target.value)}><option>Unpaid</option><option>Part paid</option><option>Paid</option></Select></Field></div><div className="my-5 rounded-xl border"><div className="flex items-center justify-between border-b bg-muted/35 px-4 py-3"><p className="text-sm font-semibold">Items</p><Button type="button" variant="soft" className="min-h-8 px-2.5 text-xs" onClick={() => setO(x => ({ ...x, items: [...x.items, { productId: store.products[0]?.id || '', quantity: 1, unitPrice: store.products[0]?.retailPriceDozen || 0, costSnapshot: 0 }] }))}><Plus size={14} /> Add item</Button></div><div className="space-y-3 p-4">{o.items.map((item, idx) => <div className="grid items-end gap-3 sm:grid-cols-[1fr_100px_120px_30px]" key={idx}><Field label="Product"><Select value={item.productId} onChange={e => { const p = store.products.find(x => x.id === e.target.value); updateItem(idx, 'productId', e.target.value); updateItem(idx, 'unitPrice', p?.retailPriceDozen || 0); }} >{store.products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</Select></Field><Field label="Qty"><Input type="number" min="1" value={item.quantity} onChange={e => updateItem(idx, 'quantity', Number(e.target.value))} /></Field><Field label="Price"><Input type="number" min="0" step=".01" value={item.unitPrice} onChange={e => updateItem(idx, 'unitPrice', Number(e.target.value))} /></Field><IconButton label="Remove item" onClick={() => setO(x => ({ ...x, items: x.items.filter((_, i) => i !== idx) }))}><Trash2 size={15} /></IconButton></div>)}</div></div><div className="grid gap-4 sm:grid-cols-4"><Field label="Discount"><Input type="number" min="0" value={o.discount} onChange={e => set('discount', Number(e.target.value))} /></Field><Field label="Delivery fee"><Input type="number" min="0" value={o.deliveryFee} onChange={e => set('deliveryFee', Number(e.target.value))} /></Field><Field label="Amount paid"><Input type="number" min="0" value={o.amountPaid} onChange={e => set('amountPaid', Number(e.target.value))} /></Field><Field label="Payment method"><Select value={o.paymentMethod} onChange={e => set('paymentMethod', e.target.value)}><option>Cash</option><option>Mobile money</option><option>Bank transfer</option></Select></Field></div><Field label="Notes"><textarea className="mt-4 min-h-16 w-full rounded-lg border bg-background p-3 text-sm outline-none focus:border-primary" value={o.notes} onChange={e => set('notes', e.target.value)} /></Field><div className="mt-5 flex items-center justify-between border-t pt-4"><div><span className="text-xs text-muted-foreground">Order total</span><p className="mono text-xl font-semibold">{money(total)}</p></div><div className="flex gap-2"><Button type="button" variant="ghost" onClick={onClose}>Cancel</Button><Button type="submit">Save order</Button></div></div></form></Modal>;
+}
+
+function InvoiceOrderModal({ value, store, onClose, onSave }: { value: Order; store: Store; onClose: () => void; onSave: (v: Order) => void }) {
+  const [order, setOrder] = useState(value);
+  const total = order.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0) - order.discount + order.deliveryFee;
+  const set = <K extends keyof Order>(key: K, val: Order[K]) => setOrder(current => ({ ...current, [key]: val }));
+  const snapshot = (item: Order['items'][number]) => {
+    const product = store.products.find(product => product.id === item.productId);
+    const recipe = store.recipes.find(recipe => recipe.productId === item.productId);
+    return recipe && product ? costOfRecipe(recipe, store.ingredients) * (product.batchYield / recipe.batchYield) : item.costSnapshot;
+  };
+  const updateItem = (index: number, patch: Partial<Order['items'][number]>) => setOrder(current => ({ ...current, items: current.items.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item) }));
+  return <Modal title={value.customerName ? `Edit ${value.invoiceNumber}` : 'New bakery invoice'} subtitle="Invoice numbers follow your Excel sequence and cannot be accidentally overwritten." onClose={onClose} wide>
+    <form onSubmit={event => { event.preventDefault(); onSave({ ...order, items: order.items.map(item => ({ ...item, costSnapshot: snapshot(item) })) }); }}>
+      <div className="mb-4 rounded-lg bg-secondary/45 px-4 py-3"><div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-secondary-foreground">Invoice number</p><p className="mono mt-1 text-lg font-semibold">{order.invoiceNumber}</p></div><span className="text-right text-xs text-secondary-foreground">Auto-assigned<br />next available number</span></div></div>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Field label="Customer name"><Input required value={order.customerName} onChange={event => set('customerName', event.target.value)} /></Field>
+        <Field label="Address"><Input value={order.customerAddress} onChange={event => set('customerAddress', event.target.value)} /></Field>
+        <Field label="City"><Input value={order.customerCity} onChange={event => set('customerCity', event.target.value)} /></Field>
+        <Field label="Phone"><Input value={order.phone} onChange={event => set('phone', event.target.value)} /></Field>
+        <Field label="Customer order no." hint="Optional reference from the customer"><Input value={order.orderNumber} onChange={event => set('orderNumber', event.target.value)} /></Field>
+        <Field label="Order date"><Input type="date" value={order.orderDate} onChange={event => set('orderDate', event.target.value)} /></Field>
+        <Field label="Due date"><Input type="date" value={order.dueDate} onChange={event => set('dueDate', event.target.value)} /></Field>
+        <Field label="Payment status"><Select value={order.paymentStatus} onChange={event => set('paymentStatus', event.target.value)}><option>Unpaid</option><option>Deposit Paid</option><option>Partially Paid</option><option>Paid</option></Select></Field>
+        <Field label="Payment method"><Select value={order.paymentMethod} onChange={event => set('paymentMethod', event.target.value)}><option>Cash</option><option>Check</option><option>Credit</option><option>Other</option><option>Mobile money</option><option>Bank transfer</option></Select></Field>
+        <Field label="Sales rep"><Input value={order.salesRep} onChange={event => set('salesRep', event.target.value)} /></Field>
+        <Field label="Code"><Input value={order.code} onChange={event => set('code', event.target.value)} /></Field>
+        <Field label="FOB"><Input value={order.fob} onChange={event => set('fob', event.target.value)} placeholder="Optional" /></Field>
+        <Field label="Tax rate (%)"><Input type="number" min="0" step=".01" value={order.taxRate} onChange={event => set('taxRate', Number(event.target.value))} /></Field>
+      </div>
+      <div className="my-5 rounded-xl border"><div className="flex items-center justify-between border-b bg-muted/35 px-4 py-3"><p className="text-sm font-semibold">Invoice items</p><Button type="button" variant="soft" className="min-h-8 px-2.5 text-xs" onClick={() => setOrder(current => ({ ...current, items: [...current.items, { productId: store.products[0]?.id || '', quantity: 1, unitPrice: store.products[0]?.retailPriceDozen || 0, costSnapshot: 0 }] }))}><Plus size={14} /> Add item</Button></div><div className="space-y-3 p-4">{order.items.map((item, index) => <div className="grid items-end gap-3 sm:grid-cols-[1fr_100px_120px_30px]" key={`${item.productId}-${index}`}><Field label="Description"><Select value={item.productId} onChange={event => { const product = store.products.find(product => product.id === event.target.value); updateItem(index, { productId: event.target.value, unitPrice: product?.retailPriceDozen || 0 }); }}>{store.products.map(product => <option key={product.id} value={product.id}>{product.name}</option>)}</Select></Field><Field label="Qty"><Input type="number" min="0.01" step=".01" value={item.quantity} onChange={event => updateItem(index, { quantity: Number(event.target.value) })} /></Field><Field label="Unit price"><Input type="number" min="0" step=".01" value={item.unitPrice} onChange={event => updateItem(index, { unitPrice: Number(event.target.value) })} /></Field><IconButton label="Remove item" type="button" onClick={() => setOrder(current => ({ ...current, items: current.items.filter((_, itemIndex) => itemIndex !== index) }))}><Trash2 size={15} /></IconButton></div>)}</div></div>
+      <div className="grid gap-4 sm:grid-cols-3"><Field label="Discount"><Input type="number" min="0" step=".01" value={order.discount} onChange={event => set('discount', Number(event.target.value))} /></Field><Field label="Delivery fee"><Input type="number" min="0" step=".01" value={order.deliveryFee} onChange={event => set('deliveryFee', Number(event.target.value))} /></Field><Field label="Amount paid"><Input type="number" min="0" step=".01" value={order.amountPaid} onChange={event => set('amountPaid', Number(event.target.value))} /></Field></div>
+      <Field label="Notes"><textarea className="mt-4 min-h-16 w-full rounded-lg border bg-background p-3 text-sm outline-none" value={order.notes} onChange={event => set('notes', event.target.value)} /></Field>
+      <div className="mt-5 flex items-center justify-between border-t pt-4"><div><span className="text-xs text-muted-foreground">Invoice total</span><p className="mono text-xl font-semibold">{money(total)}</p></div><div className="flex gap-2"><Button type="button" variant="ghost" onClick={onClose}>Cancel</Button><Button type="submit">Save invoice</Button></div></div>
+    </form>
+  </Modal>;
+}
+
+function InvoicePreview({ order, store, onClose }: { order: Order; store: Store; onClose: () => void }) {
+  return createPortal(<div className="fixed inset-0 z-50 overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Print preview</p><h2 className="display text-2xl font-semibold">{order.invoiceNumber}</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={onClose}>Close</Button><Button onClick={() => window.print()}><FileText size={16} /> Print / save PDF</Button></div></div><InvoiceDocument order={order} products={store.products} settings={store.settings} /></div></div>, document.body);
 }
 
 function Expenses() {
