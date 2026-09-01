@@ -109,3 +109,62 @@ button:active { transform: translateY(1px); }
   .printable-invoice { position: absolute; inset: 0; width: 100%; min-height: 0; margin: 0; padding: 26mm 18mm 18mm; box-shadow: none; }
   .no-print { display: none !important; }
 }
+.printable-report, .printable-report * { visibility: visible !important; }
+.report-paper {
+  width: min(100%, 760px);
+  margin: 0 auto;
+  padding: 42px 46px 34px;
+  background: #fff;
+  color: #252024;
+  font-family: Arial, Helvetica, sans-serif;
+  box-shadow: 0 12px 40px rgba(35, 21, 28, .14);
+}
+.report-header { display: grid; grid-template-columns: auto 1fr 1.25fr; gap: 22px; align-items: start; border-bottom: 1px solid #d9d2d2; padding-bottom: 24px; }
+.report-logo { display: flex; align-items: flex-start; }
+.report-logo img { max-height: 70px; width: auto; object-fit: contain; }
+.report-company { display: grid; gap: 3px; font-size: 11px; line-height: 1.35; white-space: pre-line; }
+.report-company strong { margin-bottom: 5px; font-size: 14px; }
+.report-meta { text-align: right; }
+.report-meta-row { display: grid; gap: 3px; font-size: 10px; }
+.report-meta-row strong { font-size: 12px; }
+.report-title { margin-top: 30px; font-size: 26px; font-weight: 700; }
+.report-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 34px; padding: 25px 0 22px; }
+.report-info-grid h2 { margin: 0 0 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+.report-info-grid dl { display: grid; gap: 7px; margin: 0; font-size: 11px; }
+.report-info-grid dl div { display: grid; grid-template-columns: 66px 1fr; gap: 9px; }
+.report-info-grid dt { color: #76686e; }
+.report-info-grid dd { margin: 0; min-height: 14px; border-bottom: 1px solid #eee8e8; }
+.report-products { padding-top: 8px; }
+.report-products h2, .report-stock h2, .report-expenses h2 { margin: 0 0 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+.report-product-block { margin-bottom: 18px; border: 1px solid #eee8e8; border-radius: 6px; overflow: hidden; }
+.report-product-header { display: flex; justify-content: space-between; align-items: center; background: #f9f6f7; padding: 8px 12px; font-size: 12px; }
+.report-product-header strong { font-size: 13px; }
+.report-product-header span { font-size: 11px; color: #76686e; }
+.report-product-footer { display: flex; justify-content: flex-end; padding: 6px 12px; border-top: 1px solid #eee8e8; font-size: 11px; }
+.report-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.report-table th { padding: 7px 10px; border-bottom: 1px solid #6a5360; text-align: left; font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+.report-table td { padding: 5px 10px; border-bottom: 1px solid #f0ebeb; }
+.report-table .right { text-align: right; }
+.report-empty { padding: 10px 12px; font-size: 11px; color: #999; }
+.report-stock, .report-expenses { padding-top: 18px; }
+.report-positive { color: #6a5360; }
+.report-negative { color: #c0392b; font-weight: 600; }
+.report-badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 9px; font-weight: 700; }
+.badge-ok { background: #e8e3e5; color: #6a5360; }
+.badge-low { background: #fdf2e9; color: #b7791f; }
+.badge-out { background: #fdedec; color: #c0392b; }
+.report-footer { display: flex; justify-content: space-between; margin-top: 36px; padding-top: 13px; border-top: 1px solid #d9d2d2; color: #76686e; font-size: 10px; }
+@media (max-width: 640px) {
+  .report-paper { padding: 28px 18px; }
+  .report-header, .report-info-grid { grid-template-columns: 1fr; gap: 18px; }
+  .report-meta { text-align: left; }
+  .report-title { margin-top: 12px; }
+  .report-table { font-size: 10px; }
+}
+@media print {
+  @page { size: A4 portrait; margin: 0; }
+  body * { visibility: hidden !important; }
+  .printable-report, .printable-report * { visibility: visible !important; }
+  .printable-report { position: absolute; inset: 0; width: 100%; min-height: 0; margin: 0; padding: 26mm 18mm 18mm; box-shadow: none; }
+  .no-print { display: none !important; }
+}

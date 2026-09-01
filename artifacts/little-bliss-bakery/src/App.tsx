@@ -10,6 +10,7 @@ import {
   Bell, History, Home, MoreHorizontal, ChevronLeft, Clock, Edit3, Users
 } from 'lucide-react';
 import { InvoiceDocument } from '@/components/invoice-document';
+import { BakingReportDocument } from '@/components/baking-report-document';
 import { formatInvoiceNumber, getNextInvoiceNumber, loadStore, saveStore, resetStore, unitCost, costOfRecipe, ingredientUsageForOrder, ingredientUsageForOrders, projectedStock, doughLeftover, today, createAuditEntry, createNotification, unreadCount, type Store, type Ingredient, type Product, type Recipe, type Order, type Expense, type InventoryTransaction, type BudgetAllocation, type AuditLogEntry, type Notification, type Client } from '@/lib/store';
 import { parseExcelFile, buildImportData, type ParsedInvoice, type ImportResult } from '@/lib/excel-import';
 import { useIsMobile } from '@/hooks/use-mobile';
