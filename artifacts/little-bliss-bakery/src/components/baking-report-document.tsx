@@ -1,4 +1,4 @@
-import { unitCost, costOfRecipe, ingredientUsageForOrder, type Order, type Store } from '@/lib/store';
+import { unitCost, costOfRecipe, ingredientUsageForOrder, calculateOrderTotal, calculateOrderCost, roundCurrency, type Order, type OrderItem, type Store } from '@/lib/store';
 
 type BakingReportDocumentProps = {
   order: Order;
@@ -16,17 +16,16 @@ const rd = (v: string) =>
   });
 
 export function BakingReportDocument({ order, store }: BakingReportDocumentProps) {
-  const orderTotal = order.items.reduce((a, i) => a + i.quantity * i.unitPrice, 0) - order.discount + order.deliveryFee;
-  const orderCost = order.items.reduce((a, i) => a + i.quantity * i.costSnapshot, 0);
-  const usage = ingredientUsageForOrder(order, store.recipes, store.products, store.ingredients);
+  const orderTotal = calculateOrderTotal(order.items, order.discount, order.deliveryFee, order.taxRate || 0);
+  const orderCost = calculateOrderCost(order.items);
+  const usage = ingredientUsageForOrder(order, store.recipes);
   const linkedExpenses = store.expenses.filter(e => e.relatedOrderId === order.id);
   const totalExpenses = linkedExpenses.reduce((s, e) => s + e.amount, 0);
   const profit = orderTotal - orderCost - totalExpenses;
 
   const perProduct = order.items.map(item => {
-    const product = store.products.find(p => p.id === item.productId);
-    const recipe = store.recipes.find(r => r.productId === item.productId);
-    const batches = product ? item.quantity / product.batchYield : 0;
+    const recipe = store.recipes.find(r => r.id === item.productId);
+    const batches = recipe ? Math.ceil(item.quantity / recipe.batchYield) : 0;
     const ingredients = recipe ? recipe.ingredients.map(row => {
       const ing = store.ingredients.find(i => i.id === row.ingredientId);
       const usedQty = row.quantity * batches;
@@ -37,19 +36,19 @@ export function BakingReportDocument({ order, store }: BakingReportDocumentProps
         usedQty,
         currentStock: ing?.currentStock || 0,
         remaining: Math.max(0, (ing?.currentStock || 0) - usedQty),
-        cost: up !== null ? up * usedQty : null,
+        cost: up !== null ? roundCurrency(up * usedQty) : null,
       };
     }) : [];
     const batchCost = recipe ? costOfRecipe(recipe, store.ingredients) : 0;
     return {
-      product,
+      recipe,
       quantity: item.quantity,
       unitPrice: item.unitPrice,
       batches,
       ingredients,
       batchCost,
-      lineCost: item.quantity * item.costSnapshot,
-      lineRevenue: item.quantity * item.unitPrice,
+      lineCost: roundCurrency(item.quantity * item.costSnapshot),
+      lineRevenue: roundCurrency(item.quantity * item.unitPrice),
     };
   });
 
@@ -115,7 +114,7 @@ export function BakingReportDocument({ order, store }: BakingReportDocumentProps
         {perProduct.map((pp, idx) => (
           <div key={idx} className="report-product-block">
             <div className="report-product-header">
-              <strong>{pp.product?.name || 'Unknown'}</strong>
+              <strong>{pp.recipe?.name || 'Unknown'}</strong>
               <span>{pp.quantity} units · {pp.batches.toFixed(1)} batches</span>
               <span className="mono">{rp(pp.lineRevenue)}</span>
             </div>

@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import type { Product, Order, OrderItem, Expense, Client } from './store';
+import type { Recipe, Order, OrderItem, Expense, Client } from './store';
 
 export type ParsedInvoice = {
   invoiceNumber: string;
@@ -17,7 +17,7 @@ export type ParsedInvoice = {
 };
 
 export type ImportResult = {
-  products: Product[];
+  recipes: Recipe[];
   orders: Order[];
   expenses: Expense[];
   clients: Client[];
@@ -217,18 +217,18 @@ export function parseExcelFile(file: File): Promise<ParsedInvoice[]> {
 
 export function buildImportData(
   invoices: ParsedInvoice[],
-  existingProducts: Product[],
+  existingRecipes: Recipe[],
   existingOrders: Order[]
 ): ImportResult {
   const warnings: string[] = [];
-  const productMap = new Map<string, Product>();
+  const recipeMap = new Map<string, Recipe>();
   const clientMap = new Map<string, Client>();
   const orders: Order[] = [];
   const expenses: Expense[] = [];
 
-  // Index existing products by normalized name
-  for (const p of existingProducts) {
-    productMap.set(p.name.toLowerCase(), p);
+  // Index existing recipes by normalized name
+  for (const r of existingRecipes) {
+    recipeMap.set(r.name.toLowerCase(), r);
   }
 
   // Track existing invoice numbers to avoid duplicates
@@ -257,9 +257,9 @@ export function buildImportData(
         continue;
       }
 
-      // Find or create product
-      let product = productMap.get(productName.toLowerCase());
-      if (!product) {
+      // Find or create recipe
+      let recipe = recipeMap.get(productName.toLowerCase());
+      if (!recipe) {
         // Determine category from name
         let category = 'Other';
         const lowerName = productName.toLowerCase();
@@ -269,8 +269,8 @@ export function buildImportData(
         else if (lowerName.includes('cake')) category = 'Cakes';
         else if (lowerName.includes('nata')) category = 'Pastries';
 
-        product = {
-          id: `prod-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        recipe = {
+          id: `recipe-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           name: productName,
           category,
           description: '',
@@ -284,13 +284,19 @@ export function buildImportData(
           retailPriceDozen: item.unitPrice,
           wholesalePriceDozen: item.unitPrice - 20,
           active: true,
+          ovenTemp: '170-180°C',
+          bakeTimeMinutes: 14,
+          ingredients: [],
+          doughWeight: 0,
+          finishedWeight: 0,
+          notes: '',
         };
-        productMap.set(productName.toLowerCase(), product);
-        warnings.push(`Created new product: ${productName}`);
+        recipeMap.set(productName.toLowerCase(), recipe);
+        warnings.push(`Created new recipe: ${productName}`);
       }
 
       orderItems.push({
-        productId: product.id,
+        productId: recipe.id,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         costSnapshot: 0,
@@ -333,8 +339,8 @@ export function buildImportData(
         deliveryFee: 0,
         paymentStatus: 'Paid',
         paymentMethod: inv.paymentMethod,
-        amountPaid: orderItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0) + 0 - 0 + inv.deliveryFee,
-        payments: [{ date: inv.orderDate, amount: orderItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0) + inv.deliveryFee }],
+        amountPaid: orderItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0),
+        payments: [{ date: inv.orderDate, amount: orderItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0) }],
         notes: '',
         createdAt: new Date().toISOString(),
       });
@@ -363,7 +369,7 @@ export function buildImportData(
   }, 0);
 
   return {
-    products: Array.from(productMap.values()),
+    recipes: Array.from(recipeMap.values()),
     orders,
     expenses,
     clients: Array.from(clientMap.values()),

@@ -1,8 +1,9 @@
-import type { Order, Product, Settings } from '@/lib/store';
+import { calculateOrderSubtotal, calculateOrderTaxable, calculateOrderTax, calculateOrderTotal } from '@/lib/store';
+import type { Order, Recipe, Settings } from '@/lib/store';
 
 type InvoiceDocumentProps = {
   order: Order;
-  products: Product[];
+  recipes: Recipe[];
   settings: Settings;
 };
 
@@ -16,13 +17,13 @@ const invoiceDate = (value: string) =>
     year: 'numeric',
   });
 
-export function InvoiceDocument({ order, products, settings }: InvoiceDocumentProps) {
-  const subtotal = order.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-  const taxable = subtotal - order.discount + order.deliveryFee;
-  const tax = taxable * ((order.taxRate || 0) / 100);
-  const total = taxable + tax;
+export function InvoiceDocument({ order, recipes, settings }: InvoiceDocumentProps) {
+  const subtotal = calculateOrderSubtotal(order.items);
+  const taxable = calculateOrderTaxable(order.items, order.discount, order.deliveryFee);
+  const tax = calculateOrderTax(order.items, order.discount, order.deliveryFee, order.taxRate || 0);
+  const total = calculateOrderTotal(order.items, order.discount, order.deliveryFee, order.taxRate || 0);
   const productName = (productId: string) =>
-    products.find((product) => product.id === productId)?.name || 'Product';
+    recipes.find((recipe) => recipe.id === productId)?.name || 'Product';
 
   return (
     <article className="printable-invoice invoice-paper" aria-label={`${order.invoiceNumber} invoice`}>
