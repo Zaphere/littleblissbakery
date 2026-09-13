@@ -67,29 +67,29 @@ button:active { transform: translateY(1px); }
   font-family: Arial, Helvetica, sans-serif;
   box-shadow: 0 12px 40px rgba(35, 21, 28, .14);
 }
-.invoice-header { display: grid; grid-template-columns: auto 1fr 1.25fr .9fr; gap: 22px; align-items: start; border-bottom: 1px solid #d9d2d2; padding-bottom: 24px; }
+.invoice-header { display: grid; grid-template-columns: auto 1fr 1.25fr .9fr; gap: 22px; align-items: start; border-bottom: 2px solid #6a5360; padding-bottom: 24px; }
 .invoice-logo { display: flex; align-items: flex-start; }
 .invoice-logo img { max-height: 70px; width: auto; object-fit: contain; }
-.invoice-company { display: grid; gap: 3px; font-size: 11px; line-height: 1.35; white-space: pre-line; }
+.invoice-company { display: grid; gap: 3px; font-size: 11px; line-height: 1.45; }
 .invoice-company strong { margin-bottom: 5px; font-size: 14px; }
 .invoice-meta { text-align: right; }
 .invoice-meta-row { display: grid; gap: 3px; font-size: 10px; }
 .invoice-meta-row strong { font-size: 12px; }
-.invoice-title { margin-top: 30px; font-size: 26px; font-weight: 700; }
+.invoice-title { margin-top: 30px; font-size: 26px; font-weight: 700; letter-spacing: 0.02em; }
 .invoice-customer-grid { display: grid; grid-template-columns: 1.35fr .9fr; gap: 34px; padding: 25px 0 22px; }
-.invoice-customer-grid h2, .invoice-bottom-grid h2 { margin: 0 0 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+.invoice-customer-grid h2, .invoice-bottom-grid h2 { margin: 0 0 12px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: #6a5360; }
 .invoice-customer dl, .invoice-misc dl { display: grid; gap: 7px; margin: 0; font-size: 11px; }
-.invoice-customer dl div, .invoice-misc dl div { display: grid; grid-template-columns: 66px 1fr; gap: 9px; }
+.invoice-customer dl div, .invoice-misc dl div { display: grid; grid-template-columns: 72px 1fr; gap: 9px; }
 .invoice-customer dt, .invoice-misc dt { color: #76686e; }
 .invoice-customer dd, .invoice-misc dd { margin: 0; min-height: 14px; border-bottom: 1px solid #eee8e8; }
 .invoice-items { width: 100%; border-collapse: collapse; font-size: 11px; }
-.invoice-items th { padding: 9px 8px; border-top: 1px solid #6a5360; border-bottom: 1px solid #6a5360; text-align: left; font-weight: 700; }
+.invoice-items th { padding: 9px 8px; border-top: 2px solid #6a5360; border-bottom: 2px solid #6a5360; text-align: left; font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
 .invoice-items td { height: 29px; padding: 7px 8px; border-bottom: 1px solid #ebe6e6; }
 .invoice-items th:first-child, .invoice-items td:first-child { width: 64px; }
 .invoice-items th:nth-child(3), .invoice-items td:nth-child(3) { width: 112px; text-align: right; }
 .invoice-items th:last-child, .invoice-items td:last-child { width: 116px; text-align: right; }
 .invoice-bottom-grid { display: grid; grid-template-columns: 1.5fr .9fr; gap: 34px; padding-top: 24px; }
-.invoice-payment { font-size: 10px; line-height: 1.45; }
+.invoice-payment { font-size: 10px; line-height: 1.55; }
 .invoice-payment p { margin: 0; }
 .invoice-paid { margin-top: 10px !important; font-weight: 700; }
 .invoice-totals { display: grid; align-content: start; gap: 8px; font-size: 11px; }
@@ -107,37 +107,37 @@ button:active { transform: translateY(1px); }
   font-family: Arial, Helvetica, sans-serif;
   box-shadow: 0 12px 40px rgba(35, 21, 28, .14);
 }
-.report-header { display: grid; grid-template-columns: auto 1fr 1.25fr; gap: 22px; align-items: start; border-bottom: 1px solid #d9d2d2; padding-bottom: 24px; }
+.report-header { display: grid; grid-template-columns: auto 1fr 1.25fr; gap: 22px; align-items: start; border-bottom: 2px solid #6a5360; padding-bottom: 24px; }
 .report-logo { display: flex; align-items: flex-start; }
 .report-logo img { max-height: 70px; width: auto; object-fit: contain; }
-.report-company { display: grid; gap: 3px; font-size: 11px; line-height: 1.35; white-space: pre-line; }
+.report-company { display: grid; gap: 3px; font-size: 11px; line-height: 1.45; }
 .report-company strong { margin-bottom: 5px; font-size: 14px; }
 .report-meta { text-align: right; }
 .report-meta-row { display: grid; gap: 3px; font-size: 10px; }
 .report-meta-row strong { font-size: 12px; }
-.report-title { margin-top: 30px; font-size: 26px; font-weight: 700; }
+.report-title { margin-top: 30px; font-size: 26px; font-weight: 700; letter-spacing: 0.02em; }
 .report-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 34px; padding: 25px 0 22px; }
-.report-info-grid h2 { margin: 0 0 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+.report-info-grid h2 { margin: 0 0 12px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: #6a5360; }
 .report-info-grid dl { display: grid; gap: 7px; margin: 0; font-size: 11px; }
 .report-info-grid dl div { display: grid; grid-template-columns: 66px 1fr; gap: 9px; }
 .report-info-grid dt { color: #76686e; }
 .report-info-grid dd { margin: 0; min-height: 14px; border-bottom: 1px solid #eee8e8; }
 .report-products { padding-top: 8px; }
-.report-products h2, .report-stock h2, .report-expenses h2 { margin: 0 0 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
-.report-product-block { margin-bottom: 18px; border: 1px solid #eee8e8; border-radius: 6px; overflow: hidden; page-break-inside: avoid; break-inside: avoid; }
-.report-product-header { display: flex; justify-content: space-between; align-items: center; background: #f9f6f7; padding: 8px 12px; font-size: 12px; }
+.report-products h2, .report-stock h2, .report-expenses h2 { margin: 0 0 12px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: #6a5360; }
+.report-product-block { margin-bottom: 18px; border: 1px solid #e8e3e5; border-radius: 6px; overflow: hidden; page-break-inside: avoid; break-inside: avoid; }
+.report-product-header { display: flex; justify-content: space-between; align-items: center; background: #f7f3f4; padding: 9px 12px; font-size: 12px; border-bottom: 1px solid #e8e3e5; }
 .report-product-header strong { font-size: 13px; }
 .report-product-header span { font-size: 11px; color: #76686e; }
-.report-product-footer { display: flex; justify-content: flex-end; padding: 6px 12px; border-top: 1px solid #eee8e8; font-size: 11px; }
+.report-product-footer { display: flex; justify-content: flex-end; padding: 6px 12px; border-top: 1px solid #eee8e8; font-size: 11px; background: #faf8f8; }
 .report-table { width: 100%; border-collapse: collapse; font-size: 11px; }
-.report-table th { padding: 7px 10px; border-bottom: 1px solid #6a5360; text-align: left; font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
-.report-table td { padding: 5px 10px; border-bottom: 1px solid #f0ebeb; }
+.report-table th { padding: 7px 10px; border-top: 2px solid #6a5360; border-bottom: 2px solid #6a5360; text-align: left; font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+.report-table td { padding: 6px 10px; border-bottom: 1px solid #f0ebeb; }
 .report-table .right { text-align: right; }
 .report-empty { padding: 10px 12px; font-size: 11px; color: #999; }
 .report-stock, .report-expenses { padding-top: 18px; }
 .report-positive { color: #6a5360; }
 .report-negative { color: #c0392b; font-weight: 600; }
-.report-badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 9px; font-weight: 700; }
+.report-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 9px; font-weight: 700; }
 .badge-ok { background: #e8e3e5; color: #6a5360; }
 .badge-low { background: #fdf2e9; color: #b7791f; }
 .badge-out { background: #fdedec; color: #c0392b; }
@@ -262,29 +262,30 @@ button:active { transform: translateY(1px); }
   grid-template-columns: auto 1fr auto;
   gap: 18px;
   align-items: start;
-  border-bottom: 2px solid #252024;
+  border-bottom: 2px solid #6a5360;
   padding-bottom: 18px;
   margin-bottom: 18px;
 }
-.kitchen-logo img { max-height: 50px; width: auto; object-fit: contain; }
+.kitchen-logo img { max-height: 52px; width: auto; object-fit: contain; }
 .kitchen-title-block { display: flex; flex-direction: column; justify-content: center; }
-.kitchen-title { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
-.kitchen-subtitle { margin: 2px 0 0; font-size: 11px; color: #76686e; }
+.kitchen-title { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: #252024; }
+.kitchen-subtitle { margin: 3px 0 0; font-size: 11px; color: #76686e; }
 .kitchen-meta { text-align: right; }
 .kitchen-meta-row { display: grid; gap: 2px; font-size: 10px; }
 .kitchen-meta-row strong { font-size: 12px; }
 .kitchen-customer {
   display: flex;
-  gap: 24px;
+  gap: 32px;
   flex-wrap: wrap;
-  padding: 10px 14px;
-  background: #f9f6f7;
-  border-radius: 6px;
+  padding: 11px 14px;
+  background: #f7f3f4;
+  border-left: 3px solid #6a5360;
+  border-radius: 0 6px 6px 0;
   margin-bottom: 16px;
   font-size: 12px;
 }
-.kitchen-customer-row { display: flex; gap: 6px; }
-.kitchen-label { color: #76686e; font-weight: 600; }
+.kitchen-customer-row { display: flex; flex-direction: column; gap: 2px; }
+.kitchen-label { font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #76686e; }
 .kitchen-summary {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -413,20 +414,28 @@ button:active { transform: translateY(1px); }
 @media print {
   @page {
     size: A4 portrait;
-    margin: 10mm;
+    /* margin: 0 removes the browser's built-in URL, title and date from printed pages */
+    margin: 0;
   }
+
+  /* Collapse body to viewport height so position:fixed elements don't repeat */
+  html, body {
+    height: auto !important;
+    overflow: visible !important;
+  }
+
   body * {
     visibility: hidden !important;
   }
 
-  /* Hide modal chrome completely during print */
-  .fixed.inset-0 { display: none !important; }
+  /* Make modal overlay transparent during print */
+  .fixed.inset-0 { background: transparent !important; backdrop-filter: none !important; box-shadow: none !important; }
   .no-print { display: none !important; }
 
   /* Invoice print */
   .printable-invoice, .printable-invoice * { visibility: visible !important; }
   .printable-invoice {
-    position: absolute;
+    position: fixed;
     top: 0;
     left: 0;
     width: 100%;
@@ -434,18 +443,19 @@ button:active { transform: translateY(1px); }
     padding: 0;
     box-shadow: none;
     background: white;
+    font-family: Arial, Helvetica, sans-serif;
   }
   .invoice-paper {
     width: 100%;
     min-height: auto;
-    padding: 0;
+    padding: 14mm 16mm;
     box-shadow: none;
   }
 
-  /* Report print (baking report, expenses, recipes, baking reference) */
+  /* Report print (baking report, expenses, recipes, baking reference, order form) */
   .printable-report, .printable-report * { visibility: visible !important; }
   .printable-report {
-    position: absolute;
+    position: fixed;
     top: 0;
     left: 0;
     width: 100%;
@@ -453,18 +463,19 @@ button:active { transform: translateY(1px); }
     padding: 0;
     box-shadow: none;
     background: white;
+    font-family: Arial, Helvetica, sans-serif;
   }
   .report-paper {
     width: 100%;
     min-height: auto;
-    padding: 0;
+    padding: 14mm 16mm;
     box-shadow: none;
   }
 
   /* Kitchen order print */
   .printable-kitchen, .printable-kitchen * { visibility: visible !important; }
   .printable-kitchen {
-    position: absolute;
+    position: fixed;
     top: 0;
     left: 0;
     width: 100%;
@@ -472,29 +483,32 @@ button:active { transform: translateY(1px); }
     padding: 0;
     box-shadow: none;
     background: white;
+    font-family: Arial, Helvetica, sans-serif;
   }
   .kitchen-paper {
     width: 100%;
     min-height: auto;
-    padding: 0;
+    padding: 14mm 16mm;
     box-shadow: none;
   }
 
   /* Kitchen order form print */
   .order-form-paper, .order-form-paper * { visibility: visible !important; }
   .order-form-paper {
-    position: absolute;
+    position: fixed;
     inset: 0;
     width: 100%;
     min-height: 0;
     margin: 0;
-    padding: 0;
+    padding: 14mm 16mm;
     box-shadow: none;
     background: white;
+    font-family: Arial, Helvetica, sans-serif;
   }
 
-  /* Hide modal overlays/backdrops in print */
-  .fixed.inset-0.z-\\[9999\\] { display: none !important; }
+  /* Make modal overlay invisible during print but keep layout for printable children */
+  .fixed.inset-0.z-\\[9999\\] { background: transparent !important; backdrop-filter: none !important; box-shadow: none !important; overflow: visible !important; }
+  .fixed.inset-0.z-\\[9999\\] > div { background: transparent !important; box-shadow: none !important; border-radius: 0 !important; }
 
   /* Hide non-print elements */
   .no-print { display: none !important; }
@@ -519,24 +533,26 @@ button:active { transform: translateY(1px); }
   .kitchen-product-card { page-break-inside: avoid; break-inside: avoid; }
   .baking-ref-card-print { page-break-inside: avoid; break-inside: avoid; }
   .invoice-items { page-break-inside: avoid; break-inside: avoid; }
-  .order-form-slot { page-break-inside: avoid; break-inside: avoid; }
+  .order-form-strip { page-break-inside: avoid; break-inside: avoid; }
 }
 
-/* ===== KITCHEN ORDER FORM (fill-in template) ===== */
+/* ===== KITCHEN ORDER FORM (fill-in template — strip layout) ===== */
 .order-form-paper {
-  width: min(100%, 760px);
+  width: 100%;
+  max-width: 760px;
   margin: 0 auto;
   padding: 32px 36px 28px;
   background: #fff;
   color: #252024;
   font-family: Arial, Helvetica, sans-serif;
   box-shadow: 0 12px 40px rgba(35, 21, 28, .14);
+  box-sizing: border-box;
 }
 .order-form-header {
   display: flex;
   align-items: center;
   gap: 20px;
-  border-bottom: 3px solid #252024;
+  border-bottom: 2px solid #6a5360;
   padding-bottom: 16px;
   margin-bottom: 20px;
 }
@@ -572,45 +588,53 @@ button:active { transform: translateY(1px); }
   min-height: 16px;
 }
 
-/* Grid: 2 columns, 2 rows = 4 slots */
-.order-form-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 16px;
+/* Strips container */
+.order-form-strips {
+  display: flex;
+  flex-direction: column;
 }
 
-/* Individual order slot */
-.order-form-slot {
-  border: 2px solid #252024;
-  border-radius: 8px;
-  overflow: hidden;
+/* Individual order strip */
+.order-form-strip {
+  border-top: 2px dashed #252024;
+  padding: 14px 0 18px;
+  page-break-inside: avoid;
+  break-inside: avoid;
 }
-.order-form-slot-header {
+.order-form-strip--first {
+  border-top-style: solid;
+}
+.order-form-strip-top {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  background: #f5f2f3;
-  padding: 10px 14px;
-  border-bottom: 1px solid #d9d2d2;
+  gap: 16px;
+  margin-bottom: 12px;
 }
-.order-form-slot-number {
+.order-form-strip-number {
   font-size: 18px;
   font-weight: 800;
   color: #6a5360;
 }
-.order-form-slot-date-area {
+.order-form-strip-date-area {
   display: flex;
   align-items: center;
   gap: 6px;
 }
-.order-form-slot-date-area .order-form-underline {
-  width: 80px;
+.order-form-strip-date-area .order-form-underline {
+  width: 90px;
 }
-.order-form-slot-body {
-  padding: 14px 16px 16px;
+
+/* Strip body — 3 columns */
+.order-form-strip-body {
+  display: grid;
+  grid-template-columns: 1.2fr 1.8fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+.order-form-strip-col {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
 }
 
 /* Field group: label + underline */
@@ -630,55 +654,33 @@ button:active { transform: translateY(1px); }
   border-bottom: 1.5px solid #252024;
   min-height: 22px;
 }
+.order-form-underline-short {
+  width: 80px;
+}
 
-/* Two-column row */
-.order-form-two-col {
+/* Products rows */
+.order-form-col-headers {
   display: flex;
-  gap: 14px;
-  align-items: flex-end;
+  gap: 10px;
+  margin-bottom: 2px;
 }
-.order-form-col-wide { flex: 2; }
-.order-form-col-narrow { flex: 1; }
+.order-form-col-header {
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #76686e;
+}
+.order-form-col-header-item { flex: 2; text-align: left; }
+.order-form-col-header-qty { flex: 1; text-align: center; }
 
-/* Products block with multiple lines */
-.order-form-products-block {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.order-form-products-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
 .order-form-product-row {
   display: flex;
   gap: 10px;
   align-items: flex-end;
 }
-.order-form-col-headers {
-  display: flex;
-  gap: 10px;
-  justify-content: flex-end;
-}
-.order-form-col-header {
-  font-size: 7px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: #aaa;
-}
-.order-form-col-header:first-child {
-  flex: 2;
-  text-align: left;
-}
-.order-form-col-header:last-child {
-  flex: 1;
-  text-align: center;
-}
-.order-form-underline-short {
-  width: 80px;
-}
+.order-form-col-wide { flex: 2; }
+.order-form-col-narrow { flex: 1; }
 
 /* Tickbox area */
 .order-form-tick-area {
@@ -687,7 +689,7 @@ button:active { transform: translateY(1px); }
   align-items: center;
   gap: 3px;
   flex-shrink: 0;
-  padding-bottom: 2px;
+  padding-top: 6px;
 }
 .order-form-checkbox {
   width: 26px;
@@ -713,21 +715,24 @@ button:active { transform: translateY(1px); }
   font-size: 9px;
 }
 
-/* Small label (used in header) */
-.order-form-small-label {
-  font-size: 8px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: #76686e;
+/* Print overrides */
+@media print {
+  @page { size: A4 landscape; margin: 10mm; }
+  .order-form-paper {
+    width: 100%;
+    max-width: none;
+    box-shadow: none;
+    padding: 0;
+  }
+  .order-form-strip { page-break-inside: avoid; break-inside: avoid; }
 }
 
 /* Mobile */
 @media (max-width: 640px) {
   .order-form-paper { padding: 18px 16px; }
   .order-form-header { flex-wrap: wrap; gap: 12px; }
-  .order-form-grid { grid-template-columns: 1fr; }
   .order-form-logo { display: flex; }
   .order-form-date-box { width: 100%; flex-direction: row; justify-content: space-between; }
   .order-form-date-line { flex: 1; }
+  .order-form-strip-body { grid-template-columns: 1fr; gap: 12px; }
 }

@@ -35,7 +35,7 @@ export function InvoiceDocument({ order, recipes, settings }: InvoiceDocumentPro
           <strong>{settings.bakeryName || 'Little Bliss Bakery'}</strong>
           <span>{settings.address || 'P.O. Box 2700'}</span>
           <span>Matsapha, Eswatini</span>
-          <span>Cell: {settings.phone || '+268 621 0474'}</span>
+          <span>{settings.phone || '+268 621 0474'}</span>
           <span>{settings.email || 'morrelloblue@gmail.com'}</span>
         </div>
         <div className="invoice-meta">
@@ -58,7 +58,7 @@ export function InvoiceDocument({ order, recipes, settings }: InvoiceDocumentPro
           </dl>
         </div>
         <div className="invoice-misc">
-          <h2>Misc</h2>
+          <h2>Order Details</h2>
           <dl>
             <div><dt>Date</dt><dd>{invoiceDate(order.orderDate)}</dd></div>
             <div><dt>Order No.</dt><dd>{order.orderNumber || '—'}</dd></div>
@@ -110,17 +110,17 @@ export function InvoiceDocument({ order, recipes, settings }: InvoiceDocumentPro
           {order.amountPaid > 0 && <p className="invoice-paid">Amount received: {invoiceMoney(order.amountPaid)}</p>}
         </div>
         <div className="invoice-totals">
-          <div><span>SubTotal</span><strong>{invoiceMoney(subtotal)}</strong></div>
-          {order.discount > 0 && <div><span>Discount</span><strong>-{invoiceMoney(order.discount)}</strong></div>}
+          <div><span>Sub Total</span><strong>{invoiceMoney(subtotal)}</strong></div>
+          {order.discount > 0 && <div><span>Discount</span><strong>−{invoiceMoney(order.discount)}</strong></div>}
           {order.deliveryFee > 0 && <div><span>Delivery</span><strong>{invoiceMoney(order.deliveryFee)}</strong></div>}
-          <div><span>Tax Rate(s)</span><strong>{order.taxRate || 0}%</strong></div>
+          <div><span>Tax</span><strong>{order.taxRate || 0}%</strong></div>
           <div className="invoice-total"><span>TOTAL</span><strong>{invoiceMoney(total)}</strong></div>
         </div>
       </section>
 
       <footer className="invoice-footer">
-        <span>It has been a pleasure working with you.</span>
-        <span>Pg 1</span>
+        <span>Thank you for your business.</span>
+        <span>Little Bliss Bakery</span>
       </footer>
     </article>
   );

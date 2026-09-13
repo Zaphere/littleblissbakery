@@ -71,7 +71,7 @@ export function BakingReportDocument({ order, store }: BakingReportDocumentProps
           <strong>Little Bliss Bakery</strong>
           <span>P.O. Box 2700</span>
           <span>Matsapha, Eswatini</span>
-          <span>Cell: +268 621 0474</span>
+          <span>+268 621 0474</span>
           <span>morrelloblue@gmail.com</span>
         </div>
         <div className="report-meta">

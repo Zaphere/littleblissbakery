@@ -140,7 +140,7 @@ export const loadStore = (): Store => {
     const raw = localStorage.getItem(KEY);
     if (!raw) return initialStore;
     const parsed = JSON.parse(raw) as Partial<Store> & { products?: { id: string; name: string; category: string; description: string; image: string; batchYield: number; servingSize: string; laborCost: number; energyCost: number; packagingCost: number; wastagePercent: number; retailPriceDozen: number; wholesalePriceDozen: number; active: boolean; ovenTemp: string; bakeTimeMinutes: number }[]; recipes?: any[] };
-    const normalizedOrders = (parsed.orders || []).map((order, index) => normalizeOrder(order, index));
+    let normalizedOrders = (parsed.orders || []).map((order, index) => normalizeOrder(order, index));
     const maxExisting = Math.max(0, ...normalizedOrders.map(order => invoiceSequence(order.invoiceNumber)));
     let recipes = parsed.recipes || [];
     if (parsed.products && parsed.products.length && recipes.some((r: any) => r.productId)) {
@@ -152,9 +152,11 @@ export const loadStore = (): Store => {
       }).filter((r: any) => !r.productId || productMap.has(r.productId));
     }
     const removedRecipeIds = ['dark-choc', 'oatmeal-pies'];
+    const productIdRemap: Record<string, string> = { 'dark-choc': 'dark-choc-chip', 'oatmeal-pies': 'oatmeal' };
     recipes = recipes.filter((r: any) => !removedRecipeIds.includes(r.id));
     const batchYieldOverrides: Record<string, number> = { 'oat-raisin': 25, 'choc-chip': 25 };
     recipes = recipes.map((r: any) => batchYieldOverrides[r.id] !== undefined ? { ...r, batchYield: batchYieldOverrides[r.id] } : r);
+    normalizedOrders = normalizedOrders.map((o: any) => ({ ...o, items: o.items.map((it: any) => ({ ...it, productId: productIdRemap[it.productId] || it.productId })) }));
     return {
       ...initialStore,
       ...parsed,

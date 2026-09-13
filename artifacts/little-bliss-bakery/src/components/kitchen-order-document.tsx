@@ -5,9 +5,6 @@ type KitchenOrderDocumentProps = {
   store: Store;
 };
 
-const rp = (n: number) =>
-  `E${n.toLocaleString('en-SZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
 const rd = (v: string) =>
   new Date(`${v}T00:00:00`).toLocaleDateString('en-SZ', {
     day: '2-digit',
@@ -34,7 +31,7 @@ export function KitchenOrderDocument({ order, store }: KitchenOrderDocumentProps
       recipe,
       quantity: item.quantity,
       batches,
-      ovenTemp: recipe?.ovenTemp || '170-180°C',
+      ovenTemp: recipe?.ovenTemp || '170–180°C',
       bakeTime: recipe?.bakeTimeMinutes || 14,
       ingredients,
     };
@@ -51,7 +48,7 @@ export function KitchenOrderDocument({ order, store }: KitchenOrderDocumentProps
           <img src="/little-bliss-logo.jpg" alt="Little Bliss Bakery" className="h-12 w-auto object-contain" />
         </div>
         <div className="kitchen-title-block">
-          <h1 className="kitchen-title">KITCHEN ORDER</h1>
+          <h1 className="kitchen-title">Kitchen Order</h1>
           <p className="kitchen-subtitle">Little Bliss Bakery</p>
         </div>
         <div className="kitchen-meta">
@@ -73,18 +70,18 @@ export function KitchenOrderDocument({ order, store }: KitchenOrderDocumentProps
       {/* Customer Info */}
       <section className="kitchen-customer">
         <div className="kitchen-customer-row">
-          <span className="kitchen-label">Customer:</span>
+          <span className="kitchen-label">Customer</span>
           <strong>{order.customerName || '—'}</strong>
         </div>
         {order.phone && (
           <div className="kitchen-customer-row">
-            <span className="kitchen-label">Phone:</span>
+            <span className="kitchen-label">Phone</span>
             <strong>{order.phone}</strong>
           </div>
         )}
         {order.notes && (
           <div className="kitchen-customer-row">
-            <span className="kitchen-label">Notes:</span>
+            <span className="kitchen-label">Notes</span>
             <strong>{order.notes}</strong>
           </div>
         )}
@@ -124,21 +121,18 @@ export function KitchenOrderDocument({ order, store }: KitchenOrderDocumentProps
             {/* Baking Details */}
             <div className="kitchen-baking-details">
               <div className="kitchen-baking-item">
-                <span className="kitchen-baking-icon">🌡️</span>
                 <div>
                   <span className="kitchen-baking-label">Oven Temp</span>
                   <span className="kitchen-baking-value">{pp.ovenTemp}</span>
                 </div>
               </div>
               <div className="kitchen-baking-item">
-                <span className="kitchen-baking-icon">⏱️</span>
                 <div>
                   <span className="kitchen-baking-label">Bake Time</span>
                   <span className="kitchen-baking-value">{pp.bakeTime} min</span>
                 </div>
               </div>
               <div className="kitchen-baking-item">
-                <span className="kitchen-baking-icon">📦</span>
                 <div>
                   <span className="kitchen-baking-label">Per Batch</span>
                   <span className="kitchen-baking-value">{pp.recipe?.batchYield || '—'} units</span>
@@ -149,11 +143,11 @@ export function KitchenOrderDocument({ order, store }: KitchenOrderDocumentProps
             {/* Ingredient Checklist */}
             {pp.ingredients.length > 0 && (
               <div className="kitchen-ingredients">
-                <p className="kitchen-ingredients-title">Ingredients Needed:</p>
+                <p className="kitchen-ingredients-title">Ingredients Needed</p>
                 <div className="kitchen-ingredient-grid">
                   {pp.ingredients.map((ing, j) => (
                     <div key={j} className="kitchen-ingredient-row">
-                      <span className="kitchen-checkbox">☐</span>
+                      <span className="kitchen-checkbox">&#9633;</span>
                       <span className="kitchen-ingredient-name">{ing.name}</span>
                       <span className="kitchen-ingredient-qty">{ing.requiredQty.toFixed(0)} {ing.unit}</span>
                     </div>
@@ -164,10 +158,10 @@ export function KitchenOrderDocument({ order, store }: KitchenOrderDocumentProps
 
             {/* Batch Tally */}
             <div className="kitchen-tally">
-              <p className="kitchen-tally-title">Batch Progress:</p>
+              <p className="kitchen-tally-title">Batch Progress</p>
               <div className="kitchen-tally-boxes">
                 {Array.from({ length: pp.batches }).map((_, i) => (
-                  <span key={i} className="kitchen-tally-box">☐</span>
+                  <span key={i} className="kitchen-tally-box">&#9633;</span>
                 ))}
               </div>
             </div>
@@ -181,7 +175,7 @@ export function KitchenOrderDocument({ order, store }: KitchenOrderDocumentProps
           <span>Little Bliss Bakery — Kitchen Order</span>
         </div>
         <div className="kitchen-footer-right">
-          <span>Printed: {new Date().toLocaleDateString('en-SZ', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+          <span>{new Date().toLocaleDateString('en-SZ', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
         </div>
       </footer>
     </article>
