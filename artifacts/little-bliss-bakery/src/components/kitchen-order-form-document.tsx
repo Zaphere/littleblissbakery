@@ -45,30 +45,20 @@ export function KitchenOrderFormDocument({ numberOfSlots = 4 }: KitchenOrderForm
               </div>
 
               <div className="order-form-strip-col order-form-strip-col-middle">
-                <div className="order-form-col-headers">
-                  <span className="order-form-col-header order-form-col-header-item">Item</span>
-                  <span className="order-form-col-header order-form-col-header-qty">Qty</span>
-                </div>
-                {[1, 2, 3].map((row) => (
-                  <div key={row} className="order-form-product-row">
-                    <div className="order-form-field-group order-form-col-wide">
-                      <div className="order-form-underline" />
-                    </div>
-                    <div className="order-form-field-group order-form-col-narrow">
-                      <div className="order-form-underline" />
-                    </div>
+                <div className="order-form-product-row">
+                  <div className="order-form-field-group order-form-col-wide">
+                    <div className="order-form-underline" />
                   </div>
-                ))}
+                  <div className="order-form-field-group order-form-col-narrow">
+                    <div className="order-form-underline" />
+                  </div>
+                </div>
               </div>
 
               <div className="order-form-strip-col order-form-strip-col-right">
                 <div className="order-form-field-group">
                   <span className="order-form-label">Notes</span>
                   <div className="order-form-underline" />
-                </div>
-                <div className="order-form-tick-area">
-                  <div className="order-form-checkbox" />
-                  <span className="order-form-tick-label">Done</span>
                 </div>
               </div>
             </div>

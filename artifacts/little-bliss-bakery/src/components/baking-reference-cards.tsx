@@ -1,5 +1,5 @@
 import type { Ingredient, Recipe } from '@/lib/store';
-import { costOfRecipe, roundCurrency, unitCost } from '@/lib/store';
+import { costOfRecipe, recipeCostIssues, recipeIssueLabel, roundCurrency } from '@/lib/store';
 
 type BakingReferenceCardProps = {
   recipes: Recipe[];
@@ -12,10 +12,7 @@ export function BakingReferenceCards({ recipes, ingredients }: BakingReferenceCa
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {recipes.map((recipe) => {
-        const missing = ingredients ? recipe.ingredients.filter(row => {
-          const i = ingredients.find(x => x.id === row.ingredientId);
-          return !i || !unitCost(i);
-        }).length : 0;
+        const issues = ingredients ? recipeCostIssues(recipe, ingredients) : null;
         const batchCost = ingredients ? costOfRecipe(recipe, ingredients) : null;
 
         return (
@@ -26,11 +23,11 @@ export function BakingReferenceCards({ recipes, ingredients }: BakingReferenceCa
             <div className="space-y-1.5 px-4 py-3">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">Batch yield</span>
-                <span className="font-bold">{recipe.batchYield || 24} cookies</span>
+                <span className="font-bold">{recipe.batchYield || 24} pcs</span>
               </div>
               <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Dozen</span>
-                <span className="font-bold">{Math.ceil((recipe.batchYield || 24) / 12)} dozen</span>
+                <span className="text-muted-foreground">Dozens</span>
+                <span className="font-bold">{((recipe.batchYield || 24) / 12).toFixed(1)} dozen</span>
               </div>
               <div className="my-2 border-t border-dashed border-border" />
               <div className="flex items-center justify-between text-sm">
@@ -44,10 +41,11 @@ export function BakingReferenceCards({ recipes, ingredients }: BakingReferenceCa
               {batchCost !== null && (
                 <>
                   <div className="my-2 border-t border-dashed border-border" />
-                  <div className="flex items-center justify-between text-sm">
+                  <div className="flex items-center justify-between gap-3 text-sm">
                     <span className="text-muted-foreground">Batch cost</span>
-                    <span className={missing ? 'text-xs text-muted-foreground' : 'font-bold'}>
-                      {missing ? 'Needs pricing' : `E${roundCurrency(batchCost).toFixed(2)}`}
+                    <span className="text-right">
+                      <span className="font-bold">{`E${roundCurrency(batchCost).toFixed(2)}`}</span>
+                      {issues && issues.count > 0 && <span className="block text-[10px] font-medium text-destructive">{recipeIssueLabel(issues)}</span>}
                     </span>
                   </div>
                 </>

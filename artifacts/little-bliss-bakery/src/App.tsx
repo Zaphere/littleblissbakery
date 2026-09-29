@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState, createContext, useContext, type ReactNode, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { Route, Switch, Link, useLocation } from 'wouter';
+import { Route, Switch, Link, useLocation, useSearch } from 'wouter';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Archive, ArrowDownRight, ArrowUpRight, Banknote, BarChart3, BookOpen, Box, CalendarDays, Check, ChevronRight, ClipboardList,
-  CircleAlert, CircleDollarSign, Download, FileText, Grape, LayoutDashboard, Menu, Package,
+  CircleAlert, CircleDollarSign, Download, Eye, EyeOff, FileText, Grape, LayoutDashboard, Map as MapIcon, Menu, Package,
   Pencil, Pin, Plus, Receipt, RefreshCw, Search, Settings as SettingsIcon, Sparkles,
   Trash2, TrendingUp, Upload, Wallet, X, SlidersHorizontal,
-  Bell, History, Home, MoreHorizontal, ChevronLeft, Clock, Edit3, Users
+  Bell, History, Home, MoreHorizontal, ChevronLeft, ChevronDown, Clock, Edit3, Users, Flame, Lock
 } from 'lucide-react';
 import { InvoiceDocument } from '@/components/invoice-document';
 import { BakingReportDocument } from '@/components/baking-report-document';
@@ -16,7 +16,9 @@ import { RecipesPrintDocument } from '@/components/recipes-print-document';
 import { BakingReferenceCards } from '@/components/baking-reference-cards';
 import { BakingReferencePrintDocument } from '@/components/baking-reference-print-document';
 import { KitchenOrderFormDocument } from '@/components/kitchen-order-form-document';
-import { formatInvoiceNumber, getNextInvoiceNumber, loadStore, saveStore, resetStore, unitCost, costOfRecipe, ingredientUsageForOrder, ingredientUsageForOrders, projectedStock, doughLeftover, today, createAuditEntry, createNotification, unreadCount, calculateOrderTotal, calculateOrderCost, calculateOrderOutstanding, roundCurrency, INGREDIENT_CATEGORIES, type Store, type Ingredient, type Recipe, type Order, type Expense, type InventoryTransaction, type BudgetAllocation, type AuditLogEntry, type Notification, type Client } from '@/lib/store';
+import { ShoppingListDocument } from '@/components/shopping-list-document';
+import { StockCheckSheetDocument } from '@/components/stock-check-sheet-document';
+import { formatInvoiceNumber, getNextInvoiceNumber, loadStore, saveStore, resetStore, unitCost, costOfRecipe, costOfRow, recipeCostIssues, recipeIssueLabel, convertQty, UNIT_OPTIONS, costPerDozen, unitsFor, UNITS_PER_DOZEN, ingredientUsageForOrder, ingredientUsageForOrders, projectedStock, doughLeftover, today, createAuditEntry, createNotification, unreadCount, calculateOrderTotal, calculateOrderCost, calculateOrderOutstanding, roundCurrency, INGREDIENT_CATEGORIES, getCustomerAnalytics, type Store, type Ingredient, type Recipe, type Order, type Expense, type InventoryTransaction, type BudgetAllocation, type AuditLogEntry, type Notification, type Client, type RecipeVersion, type StaffTask, type DeliveryRoute, type WhatsAppMessage, type BackupRecord, type OrderItem, calculateSalesAnalytics, generateProductionSchedule, generatePurchaseOrders, upsertReservation, releaseReservations, issueReservation, reservationForOrder, reservationValue, reservedQuantityByIngredient, availableStock, preBakePlan, reservedBatchCount, issuedBatchCount, type MaterialReservation, type ReservationStatus, type PreBakePlan, REVENUE_PERIODS, revenueOrders, inRevenuePeriod, revenuePeriodLabel, type RevenuePeriod } from '@/lib/store';
 import { parseExcelFile, buildImportData, type ParsedInvoice, type ImportResult } from '@/lib/excel-import';
 import { useIsMobile } from '@/hooks/use-mobile';
 import '@/index.css';
@@ -26,6 +28,18 @@ const useStore = () => useContext(StoreContext);
 const money = (n: number) => `E${n.toLocaleString('en-SZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const shortDate = (s: string) => new Date(`${s}T00:00:00`).toLocaleDateString('en-SZ', { day: '2-digit', month: 'short' });
 const id = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+/* Dashboard quick actions deep-link with ?new=1 / ?invoice=<id>. wouter's
+   useLocation() only yields the pathname, so the query is read through
+   useSearch() and stripped again afterwards — otherwise the modal would
+   re-open every time the effect re-ran. */
+const clearSearchParam = (key: string) => {
+  const params = new URLSearchParams(window.location.search);
+  if (!params.has(key)) return;
+  params.delete(key);
+  const qs = params.toString();
+  window.history.replaceState(window.history.state, '', window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash);
+};
 const cx = (...v: (string | false | undefined)[]) => v.filter(Boolean).join(' ');
 
 function parseOrderText(text: string, recipes: Recipe[]): { customerName: string; items: { productId: string; quantity: number; unitPrice: number; costSnapshot: number }[]; dueDate: string; notes: string } {
@@ -148,26 +162,31 @@ function AppShell({ children }: { children: ReactNode }) {
 
 function Dashboard() {
   const { store, update } = useStore();
+  const [revPeriod, setRevPeriod] = useState<RevenuePeriod>('month');
+  const revLabel = revenuePeriodLabel(revPeriod);
   const now = new Date();
   const currentMonth = now.getMonth();
   const currentYear = now.getFullYear();
   const isCurrentMonth = (dateStr: string) => { const d = new Date(dateStr); return d.getMonth() === currentMonth && d.getFullYear() === currentYear; };
+  // Stock & production always use the real month's orders — never filtered by revenue settings
   const monthOrders = store.orders.filter(o => isCurrentMonth(o.orderDate) && !(o.archived && o.paymentStatus !== 'Paid'));
-  const monthExpenses = store.expenses.filter(e => isCurrentMonth(e.date));
-  const revenue = monthOrders.reduce((s, o) => s + o.items.reduce((a, i) => a + i.quantity * i.unitPrice, 0) - o.discount, 0);
-  const received = monthOrders.reduce((s, o) => s + o.amountPaid, 0);
-  const expenses = monthExpenses.reduce((s, e) => s + e.amount, 0);
+  // Revenue metrics honour the selected period and skip disconnected receipts
+  const revOrders = revenueOrders(store.orders, revPeriod);
+  const revExpenses = store.expenses.filter(e => inRevenuePeriod(e.date, revPeriod));
+  const revenue = revOrders.reduce((s, o) => s + o.items.reduce((a, i) => a + i.quantity * i.unitPrice, 0) - o.discount, 0);
+  const received = revOrders.reduce((s, o) => s + o.amountPaid, 0);
+  const expenses = revExpenses.reduce((s, e) => s + e.amount, 0);
   const low = store.ingredients.filter(i => i.minimumStock > 0 && i.currentStock <= i.minimumStock);
   const outstanding = roundCurrency(revenue - received);
-  const costs = monthOrders.reduce((s, o) => s + calculateOrderCost(o.items), 0);
+  const costs = revOrders.reduce((s, o) => s + calculateOrderCost(o.items), 0);
   const pendingOrders = monthOrders.filter(o => o.paymentStatus !== 'Paid');
-  const pendingUsage = ingredientUsageForOrders(pendingOrders, store.recipes);
+  const pendingUsage = ingredientUsageForOrders(pendingOrders, store.recipes, store.ingredients);
   const stockProjection = projectedStock(store.ingredients, pendingUsage);
   const dough = doughLeftover(monthOrders, store.recipes);
   const criticalStock = stockProjection.filter(s => s.used > 0 && s.remaining <= s.ingredient.minimumStock);
   const totalStockValue = roundCurrency(store.ingredients.reduce((s, i) => s + (unitCost(i) || 0) * i.currentStock, 0));
   const projectedStockValue = roundCurrency(stockProjection.reduce((s, i) => s + (unitCost(i.ingredient) || 0) * i.remaining, 0));
-  const attentionOrders = monthOrders.filter(o => o.paymentStatus?.toLowerCase() !== 'paid').sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+  const attentionOrders = revOrders.filter(o => o.paymentStatus?.toLowerCase() !== 'paid').sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
   const greeting = now.getHours() < 12 ? 'Good morning' : now.getHours() < 17 ? 'Good afternoon' : 'Good evening';
   const dateStr = now.toLocaleDateString('en-SZ', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   const bibleVerses = [
@@ -198,12 +217,18 @@ function Dashboard() {
     <PageHeader eyebrow={dateStr} title={`${greeting}, baker.`} description="Your quiet view of what needs care today." action={<div className="flex items-center gap-2"><button onClick={() => update({ settings: { ...store.settings, theme: store.settings.theme === 'dark' ? 'light' : 'dark' } })} className="flex h-9 w-9 items-center justify-center rounded-full border bg-card text-muted-foreground transition-all duration-200 hover:bg-muted active:scale-95">{store.settings.theme === 'dark' ? '☀️' : '🌙'}</button><Link href="/orders?new=1" data-testid="link-quick-new-order"><Button><Plus size={17} /> New order</Button></Link></div>} />
     <Card className="relative mb-5 h-[124px] overflow-hidden border-0 bg-sidebar text-sidebar-foreground"><img src="/little-bliss-cover.png" alt="Little Bliss Bakery treats on a wooden counter" className="absolute inset-0 h-full w-full object-cover object-center opacity-55" /><div className="absolute inset-0 bg-gradient-to-r from-sidebar via-sidebar/80 to-transparent" /><div className="relative flex h-full max-w-md flex-col justify-center px-6"><p className="mono text-[10px] uppercase tracking-[.22em] text-secondary">Little Bliss Bakery</p><p className="display mt-1 text-2xl font-semibold">A taste of pure bliss.</p><p className="mt-1 text-xs text-sidebar-foreground/70">Your shelves, orders, and numbers — in one calm view.</p></div></Card>
     <Card className="mb-5 overflow-hidden border-primary/15 bg-gradient-to-br from-primary/5 via-background to-accent/10"><div className="flex items-start gap-4 p-5"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><BookOpen size={18} /></span><div className="min-w-0 flex-1"><p className="text-sm font-semibold leading-relaxed text-foreground italic">"{verse.text}"</p><p className="mt-2 text-xs font-semibold text-primary">— {verse.ref}</p><p className="mt-1 text-[10px] text-muted-foreground">Verse of the day for the baker's heart</p></div></div></Card>
+    <div className="mb-4 flex flex-wrap items-center gap-1 rounded-lg border bg-card p-1 w-fit">
+      {REVENUE_PERIODS.map(p => (
+        <button key={p.value} onClick={() => setRevPeriod(p.value)} className={cx('rounded-md px-3 py-1.5 text-xs font-semibold transition-colors', revPeriod === p.value ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')}>{p.label}</button>
+      ))}
+    </div>
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <Metric label="Revenue this month" value={money(revenue)} trend={monthOrders.length ? `${monthOrders.length} order${monthOrders.length !== 1 ? 's' : ''}` : 'No orders yet'} icon={TrendingUp} tone="primary" note="this month" />
+      <Metric label="Revenue" value={money(revenue)} trend={revOrders.length ? `${revOrders.length} order${revOrders.length !== 1 ? 's' : ''}` : 'No orders yet'} icon={TrendingUp} tone="primary" note={revLabel} />
       <Metric label="Received" value={money(received)} trend={outstanding ? `${money(outstanding)} due` : 'All settled'} icon={Banknote} tone="lime" note="customer payments" />
-      <Metric label="Expenses" value={money(expenses)} trend="this month" icon={ArrowDownRight} tone="peach" note="recorded costs" />
+      <Metric label="Expenses" value={money(expenses)} trend={revLabel} icon={ArrowDownRight} tone="peach" note="recorded costs" />
       <Metric label="Expected profit" value={money(revenue - costs - expenses)} trend={revenue ? `${Math.round(((revenue - costs - expenses) / revenue) * 100)}% margin` : '—'} icon={Sparkles} tone="dark" note="after estimated costs" />
     </div>
+    <Card className="mt-5 overflow-hidden"><div className="flex items-center justify-between border-b px-5 py-4"><div><h2 className="font-semibold">Production Status</h2><p className="mt-0.5 text-xs text-muted-foreground">Today's production requirements and status</p></div><span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">{pendingOrders.length} pending</span></div><div className="p-5"><div className="grid gap-4 sm:grid-cols-3"><div><p className="text-xs text-muted-foreground">Units to produce</p><p className="mono mt-2 text-2xl font-semibold">{pendingOrders.reduce((sum, o) => sum + o.items.reduce((s, i) => s + unitsFor(i.quantity), 0), 0)}</p><p className="text-[10px] text-muted-foreground">across {pendingOrders.length} orders</p></div><div><p className="text-xs text-muted-foreground">Recipes needed</p><p className="mono mt-2 text-2xl font-semibold">{new Set(pendingOrders.flatMap(o => o.items.map(i => i.productId))).size}</p><p className="text-[10px] text-muted-foreground">different products</p></div><div><p className="text-xs text-muted-foreground">Estimated batches</p><p className="mono mt-2 text-2xl font-semibold">{dough.reduce((sum, d) => sum + Math.ceil(d.doughUsed / d.recipe.batchYield), 0)}</p><p className="text-[10px] text-muted-foreground">total batches</p></div></div>{criticalStock.length > 0 && <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/5 p-3"><p className="text-xs font-semibold text-destructive">Critical ingredients</p><p className="text-[10px] text-muted-foreground mt-0.5">{criticalStock.length} ingredient{criticalStock.length !== 1 ? 's' : ''} will run low after production</p></div>}</div></Card>
     <div className="mt-5 grid gap-5 xl:grid-cols-[1.45fr_1fr]">
       <Card className="overflow-hidden"><div className="flex items-center justify-between border-b px-5 py-4"><div><h2 className="font-semibold">Orders needing attention</h2><p className="mt-0.5 text-xs text-muted-foreground">Unpaid or overdue orders to process.</p></div><Link href="/orders" className="text-xs font-semibold text-primary hover:underline">View all <ChevronRight className="inline" size={14} /></Link></div><div className="grid grid-cols-2 divide-x border-b"><div className="p-5"><p className="text-xs text-muted-foreground">Unpaid orders</p><p className="mono mt-2 text-3xl font-semibold">{attentionOrders.length.toString().padStart(2, '0')}</p><p className="mt-1 text-xs text-muted-foreground">need payment follow-up</p></div><div className="p-5"><p className="text-xs text-muted-foreground">Outstanding</p><p className="mono mt-2 text-3xl font-semibold text-primary">{money(outstanding)}</p><p className="mt-1 text-xs text-muted-foreground">across {attentionOrders.length} order{attentionOrders.length !== 1 ? 's' : ''}</p></div></div><div className="divide-y">{attentionOrders.length ? attentionOrders.slice(0, 4).map(o => <OrderRow key={o.id} order={o} store={store} />) : <div className="p-5 text-center"><Empty icon={Check} title="All orders settled" detail="No unpaid orders — great work!" /></div>}</div></Card>
       <Card><div className="flex items-center justify-between border-b px-5 py-4"><div><h2 className="font-semibold">Attention shelf</h2><p className="mt-0.5 text-xs text-muted-foreground">Small things worth noticing.</p></div><span className="rounded-full bg-accent/35 px-2 py-1 text-xs font-semibold">{low.length} low</span></div><div className="p-5">{low.length ? <div className="space-y-4">{low.slice(0, 5).map(i => { const ratio = i.minimumStock > 0 ? i.currentStock / i.minimumStock : 1; const isCritical = ratio <= 0.5; const isLow = ratio <= 1; return <div key={i.id} className="flex items-center justify-between gap-3"><div className="flex min-w-0 items-center gap-3"><span className={cx('rounded-lg p-2', isCritical ? 'bg-destructive/15 text-destructive' : isLow ? 'bg-yellow-100 text-yellow-700' : 'bg-primary/10 text-primary')}><Grape size={16} /></span><div className="min-w-0"><p className="truncate text-sm font-semibold">{i.name}</p><div className="flex items-center gap-2 mt-0.5"><div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted"><div className={cx('h-full rounded-full transition-all duration-500', isCritical ? 'bg-destructive' : isLow ? 'bg-yellow-500' : 'bg-primary')} style={{ width: `${Math.min(100, (i.currentStock / (i.minimumStock * 2)) * 100)}%` }} /></div><p className="text-[10px] text-muted-foreground">{i.currentStock.toLocaleString()} {i.unit}</p></div></div></div><span className={cx('text-xs font-medium', isCritical ? 'text-destructive' : isLow ? 'text-yellow-600' : 'text-primary')}>min {i.minimumStock}</span></div>; })}</div> : <Empty icon={Check} title="Stock looks steady" detail="No ingredients are below their minimum level." />}<Link href="/inventory" className="mt-5 flex items-center justify-center gap-1 rounded-lg border py-2.5 text-xs font-semibold text-primary hover:bg-muted">View full inventory <ChevronRight size={14} /></Link></div></Card>
@@ -225,6 +250,26 @@ function OrderRow({ order, store }: { order: Order; store: Store }) {
   return <div className="flex items-center justify-between gap-3 px-5 py-4"><div className="flex min-w-0 items-center gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-bold text-secondary-foreground">{order.customerName.split(' ').map(x => x[0]).join('').slice(0, 2)}</span><div className="min-w-0"><p className="truncate text-sm font-semibold">{order.customerName}</p><p className="text-xs text-muted-foreground">{order.invoiceNumber} · {order.items.map(i => `${i.quantity} × ${store.recipes.find(p => p.id === i.productId)?.name}`).join(', ')}</p></div></div><div className="text-right"><p className="mono text-sm font-semibold">{money(total)}</p><Status status={order.paymentStatus} /></div></div>;
 }
 function Status({ status }: { status: string }) { return <span className={cx('mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold', status === 'Paid' ? 'bg-secondary text-secondary-foreground' : status === 'Part paid' || status === 'Partially Paid' ? 'bg-accent/50 text-foreground' : 'bg-muted text-muted-foreground')}>{status}</span>; }
+function PriorityBadge({ priority }: { priority?: 'Normal' | 'Rush' | 'Urgent' }) {
+  if (!priority || priority === 'Normal') return null;
+  const colors = {
+    Rush: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+    Urgent: 'bg-red-100 text-red-800 border-red-200',
+  };
+  return <span className={cx('inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-semibold', colors[priority])}>{priority}</span>;
+}
+const HOLD_LABEL: Record<ReservationStatus, string> = { reserved: 'Reserved', issued: 'Baked', released: 'Released', wasted: 'Wasted' };
+function HoldBadge({ reservation }: { reservation?: MaterialReservation }) {
+  if (!reservation) return null;
+  const styles: Record<ReservationStatus, string> = {
+    reserved: 'bg-blue-100 text-blue-900 border-blue-200',
+    issued: 'bg-emerald-100 text-emerald-900 border-emerald-200',
+    released: 'bg-muted text-muted-foreground border-border',
+    wasted: 'bg-destructive/15 text-destructive border-destructive/30',
+  };
+  const Icon = reservation.status === 'issued' ? Flame : reservation.status === 'reserved' ? Lock : CircleAlert;
+  return <span title={reservation.lines.length > 0 ? `${reservation.lines.length} ingredients held against this order` : undefined} className={cx('mt-1 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[9px] font-semibold', styles[reservation.status])}><Icon size={9} />{HOLD_LABEL[reservation.status]}</span>;
+}
 const timeAgo = (ts: string) => { const diff = Date.now() - new Date(ts).getTime(); const mins = Math.floor(diff / 60000); if (mins < 1) return 'Just now'; if (mins < 60) return `${mins}m ago`; const hrs = Math.floor(mins / 60); if (hrs < 24) return `${hrs}h ago`; return `${Math.floor(hrs / 24)}d ago`; };
 
 /* ─── MOBILE WELCOME SCREEN ─── */
@@ -278,6 +323,17 @@ function DesktopShell({ children }: { children: ReactNode }) {
     { href: '/reports', label: 'Reports', icon: BarChart3 },
     { href: '/budget', label: 'Budget', icon: CircleDollarSign },
     { href: '/clients', label: 'Clients', icon: Users },
+    { href: '/customer-analytics', label: 'Customer Analytics', icon: TrendingUp },
+    { href: '/sales-analytics', label: 'Sales Analytics', icon: BarChart3 },
+    { href: '/production-calendar', label: 'Production Calendar', icon: CalendarDays },
+    { href: '/purchase-orders', label: 'Purchase Orders', icon: Package },
+    { href: '/profit-margin', label: 'Profit Margin', icon: CircleDollarSign },
+    { href: '/financial-reports', label: 'Financial Reports', icon: FileText },
+    { href: '/expiration-tracking', label: 'Expiration Tracking', icon: Clock },
+    { href: '/delivery-routes', label: 'Delivery Routes', icon: MapIcon },
+    { href: '/whatsapp-integration', label: 'WhatsApp', icon: Bell },
+    { href: '/staff-tasks', label: 'Staff Tasks', icon: ClipboardList },
+    { href: '/backup-restore', label: 'Backup & Restore', icon: Archive },
   ];
   const { store } = useStore();
   return <div className="min-h-[100dvh] bg-background">
@@ -294,7 +350,7 @@ function DesktopShell({ children }: { children: ReactNode }) {
 /* ─── MOBILE MORE MENU ─── */
 function MoreMenu() {
   const { store, update } = useStore(); const [location] = useLocation(); const notifCount = unreadCount(store.notifications); const lowStock = store.ingredients.filter(i => i.minimumStock > 0 && i.currentStock <= i.minimumStock);
-  const items = [{ href: '/recipes', label: 'Recipes', icon: BookOpen, detail: `${store.recipes.length}` }, { href: '/inventory', label: 'Inventory', icon: Box, detail: `${lowStock.length} low` }, { href: '/expenses', label: 'Expenses', icon: Wallet, detail: `${store.expenses.length}` }, { href: '/reports', label: 'Reports', icon: BarChart3, detail: 'Profit' }, { href: '/budget', label: 'Budget', icon: CircleDollarSign, detail: 'Allocations' }, { href: '/clients', label: 'Clients', icon: Users, detail: `${store.clients.length}` }, { href: '/audit', label: 'Activity', icon: History, detail: notifCount > 0 ? `${notifCount} new` : 'Log' }, { href: '/settings', label: 'Settings', icon: SettingsIcon, detail: 'Config' }];
+  const items = [{ href: '/recipes', label: 'Recipes', icon: BookOpen, detail: `${store.recipes.length}` }, { href: '/inventory', label: 'Inventory', icon: Box, detail: `${lowStock.length} low` }, { href: '/expenses', label: 'Expenses', icon: Wallet, detail: `${store.expenses.length}` }, { href: '/reports', label: 'Reports', icon: BarChart3, detail: 'Profit' }, { href: '/budget', label: 'Budget', icon: CircleDollarSign, detail: 'Allocations' }, { href: '/clients', label: 'Clients', icon: Users, detail: `${store.clients.length}` }, { href: '/customer-analytics', label: 'Analytics', icon: TrendingUp, detail: 'Customer data' }, { href: '/audit', label: 'Activity', icon: History, detail: notifCount > 0 ? `${notifCount} new` : 'Log' }, { href: '/settings', label: 'Settings', icon: SettingsIcon, detail: 'Config' }];
   return <div><div className="flex items-center justify-between mb-4"><h1 className="display text-xl font-semibold">More</h1><button onClick={() => update({ settings: { ...store.settings, theme: store.settings.theme === 'dark' ? 'light' : 'dark' } })} className="flex h-9 w-9 items-center justify-center rounded-full border bg-card text-muted-foreground transition-colors hover:bg-muted active:scale-95">{store.settings.theme === 'dark' ? <span className="text-sm">☀️</span> : <span className="text-sm">🌙</span>}</button></div><div className="grid grid-cols-3 gap-2.5">{items.map(({ href, label, icon: Icon, detail }) => { const active = location === href; return <Link key={href} href={href} className={cx('group flex flex-col items-center gap-2 rounded-2xl border p-4 text-center transition-all duration-200 active:scale-95', active ? 'border-primary bg-primary/10 text-primary shadow-sm' : 'border-border bg-card hover:border-primary/40 hover:bg-primary/5')}><span className={cx('flex h-11 w-11 items-center justify-center rounded-xl transition-colors duration-200', active ? 'bg-primary text-primary-foreground' : 'bg-secondary text-secondary-foreground group-hover:bg-primary/15 group-hover:text-primary')}><Icon size={18} strokeWidth={active ? 2.2 : 1.6} /></span><div><p className="text-xs font-semibold leading-tight">{label}</p><p className="text-[9px] text-muted-foreground mt-0.5">{detail}</p></div></Link>; })}</div></div>;
 }
 
@@ -395,7 +451,8 @@ function IngredientModal({ value, onClose, onSave }: { value: Ingredient; onClos
   const handlePackSizeChange = (newPackSize: number) => {
     const conversion = autoConvertUnit(newPackSize, i.unit);
     if (conversion) {
-      setI(x => ({ ...x, packSize: conversion.packSize, unit: conversion.unit }));
+      // The unit changes, so every quantity stored in the old unit has to follow it.
+      setI(x => ({ ...x, packSize: conversion.packSize, unit: conversion.unit, currentStock: x.currentStock / 1000, minimumStock: x.minimumStock / 1000 }));
     } else {
       set('packSize', newPackSize);
     }
@@ -411,47 +468,526 @@ function IngredientModal({ value, onClose, onSave }: { value: Ingredient; onClos
 }
 
 function Recipes() {
-  const { store, update } = useStore(); const isMobile = useIsMobile(); const [selected, setSelected] = useState<Recipe | null>(null); const [deletingRecipe, setDeletingRecipe] = useState<Recipe | null>(null); const [deleteStep, setDeleteStep] = useState(0); const [showPrint, setShowPrint] = useState(false); const [showPrintRef, setShowPrintRef] = useState(false);
-  const save = (r: Recipe) => { const exists = store.recipes.some(x => x.id === r.id); update({ recipes: exists ? store.recipes.map(x => x.id === r.id ? r : x) : [...store.recipes, r], auditLog: [createAuditEntry('Recipes', exists ? 'updated' : 'created', r.id, r.name, `${exists ? 'Updated' : 'Created'} recipe: ${r.name}`), ...store.auditLog], notifications: [createNotification(`Recipe ${exists ? 'updated' : 'created'}`, `${r.name} was ${exists ? 'updated' : 'created'}`, 'Recipes', r.id), ...store.notifications] }); setSelected(null); };
+  const { store, update } = useStore(); const isMobile = useIsMobile(); const [selected, setSelected] = useState<Recipe | null>(null); const [deletingRecipe, setDeletingRecipe] = useState<Recipe | null>(null); const [deleteStep, setDeleteStep] = useState(0); const [printView, setPrintView] = useState<null | 'recipes' | 'cards'>(null);
+  const [showVersionHistory, setShowVersionHistory] = useState<Recipe | null>(null);
+  const save = (r: Recipe) => { 
+    const exists = store.recipes.some(x => x.id === r.id);
+    let updatedRecipe = r;
+    
+    // Create version history if updating an existing recipe
+    if (exists) {
+      const existingRecipe = store.recipes.find(x => x.id === r.id);
+      if (existingRecipe) {
+        const newVersion = (existingRecipe.version || 0) + 1;
+        const versionEntry: RecipeVersion = {
+          version: newVersion,
+          timestamp: new Date().toISOString(),
+          changedBy: 'User',
+          changes: `Updated recipe ${r.name}`,
+          recipe: { ...existingRecipe },
+        };
+        updatedRecipe = {
+          ...r,
+          version: newVersion,
+          versionHistory: [...(existingRecipe.versionHistory || []), versionEntry],
+        };
+      }
+    } else {
+      // New recipe starts at version 1
+      updatedRecipe = { ...r, version: 1, versionHistory: [] };
+    }
+    
+    update({ 
+      recipes: exists ? store.recipes.map(x => x.id === r.id ? updatedRecipe : x) : [...store.recipes, updatedRecipe], 
+      auditLog: [createAuditEntry('Recipes', exists ? 'updated' : 'created', r.id, r.name, `${exists ? 'Updated' : 'Created'} recipe: ${r.name}`), ...store.auditLog], 
+      notifications: [createNotification(`Recipe ${exists ? 'updated' : 'created'}`, `${r.name} was ${exists ? 'updated' : 'created'}`, 'Recipes', r.id), ...store.notifications] 
+    }); 
+    setSelected(null); 
+  };
+  const revertToVersion = (recipe: Recipe, versionEntry: RecipeVersion) => {
+    const revertedRecipe = {
+      ...versionEntry.recipe,
+      id: recipe.id,
+      version: (recipe.version || 0) + 1,
+      versionHistory: [
+        ...(recipe.versionHistory || []),
+        {
+          version: (recipe.version || 0) + 1,
+          timestamp: new Date().toISOString(),
+          changedBy: 'User',
+          changes: `Reverted to version ${versionEntry.version}`,
+          recipe: { ...recipe },
+        },
+      ],
+    };
+    update({
+      recipes: store.recipes.map(x => x.id === recipe.id ? revertedRecipe : x),
+      auditLog: [createAuditEntry('Recipes', 'reverted', recipe.id, recipe.name, `Reverted ${recipe.name} to version ${versionEntry.version}`), ...store.auditLog],
+      notifications: [createNotification('Recipe reverted', `${recipe.name} was reverted to version ${versionEntry.version}`, 'Recipes', recipe.id), ...store.notifications],
+    });
+    setShowVersionHistory(null);
+  };
   const removeRecipe = (r: Recipe) => { setDeletingRecipe(r); setDeleteStep(1); };
   const confirmDeleteStep1 = () => setDeleteStep(2);
   const confirmDeleteStep2 = () => { if (!deletingRecipe) return; update({ recipes: store.recipes.filter(x => x.id !== deletingRecipe.id), auditLog: [createAuditEntry('Recipes', 'deleted', deletingRecipe.id, deletingRecipe.name, `Deleted recipe: ${deletingRecipe.name}`), ...store.auditLog], notifications: [createNotification('Recipe deleted', `${deletingRecipe.name} was removed`, 'Recipes', deletingRecipe.id), ...store.notifications] }); setDeletingRecipe(null); setDeleteStep(0); };
   const cancelDelete = () => { setDeletingRecipe(null); setDeleteStep(0); };
   const newRecipe = (): Recipe => ({ id: id('recipe'), name: '', category: 'Cookies', description: '', image: '', batchYield: 24, servingSize: '1 dozen', laborCost: 0, energyCost: 0, packagingCost: 0, wastagePercent: 0, retailPriceDozen: 0, wholesalePriceDozen: 0, active: true, ovenTemp: '170-180°C', bakeTimeMinutes: 14, ingredients: [], doughWeight: 0, finishedWeight: 0, notes: '' });
-  if (isMobile) { return <div><div className="mb-4 flex items-center justify-between"><h1 className="display text-xl font-semibold">Recipes</h1><span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-semibold text-secondary-foreground">{store.recipes.length} recipes</span></div><div className="mb-3 flex items-center justify-center gap-4 text-[10px] text-muted-foreground"><span className="flex items-center gap-1"><ArrowUpRight size={10} /> Swipe right to edit</span><span className="flex items-center gap-1">Swipe left to delete <ArrowDownRight size={10} /></span></div><div className="mb-4"><h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Baking Reference</h2><BakingReferenceCards recipes={store.recipes} ingredients={store.ingredients} /></div><div className="space-y-3">{store.recipes.map(r => { const c = costOfRecipe(r, store.ingredients); const missing = r.ingredients.filter(row => { const i = store.ingredients.find(x => x.id === row.ingredientId); return !i || !unitCost(i); }).length; return <SwipeableRow key={r.id} onEdit={() => setSelected(r)} onDelete={() => removeRecipe(r)}><Card className="overflow-hidden"><div className="bg-sidebar p-4 text-sidebar-foreground"><div className="flex items-center justify-between"><p className="font-semibold text-sm">{r.name || 'Unnamed recipe'}</p><span className="rounded-full bg-sidebar-primary px-2 py-0.5 text-[10px] font-semibold text-sidebar-primary-foreground">yield {r.batchYield}</span></div></div><div className="p-4"><div className="flex items-center justify-between mb-2"><span className="text-[10px] text-muted-foreground">Batch cost</span><span className={cx('mono text-sm font-semibold', missing > 0 && 'text-muted-foreground')}>{missing ? 'Needs pricing' : money(c)}</span></div><p className="text-[10px] text-muted-foreground">{r.ingredients.length} ingredients</p></div></Card></SwipeableRow>; })}{!store.recipes.length && <Empty icon={BookOpen} title="No recipes yet" detail="Link ingredients to products to calculate batch costs." />}</div>{selected && <RecipeModal value={selected} ingredients={store.ingredients} onClose={() => setSelected(null)} onSave={save} />}{deletingRecipe && <Modal title="Delete recipe" onClose={cancelDelete}><div className="space-y-4"><p className="text-sm text-muted-foreground">{deleteStep === 1 ? <>Are you sure you want to delete <strong>{deletingRecipe.name}</strong>?</> : <><strong>This cannot be undone.</strong> Type <span className="font-semibold">DELETE</span> to confirm.</>}</p>{deleteStep === 2 && <Input autoFocus placeholder="Type DELETE to confirm" onChange={e => { if (e.target.value === 'DELETE') confirmDeleteStep2(); }} />}<div className="flex justify-end gap-2"><Button variant="ghost" onClick={cancelDelete}>Cancel</Button>{deleteStep === 1 && <Button variant="danger" onClick={confirmDeleteStep1}>Delete</Button>}</div></div></Modal>}{showPrint && createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && setShowPrint(false)}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Recipes</p><h2 className="display text-2xl font-semibold">Recipe Book</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={() => setShowPrint(false)}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Recipe Book")}><FileText size={16} /> Print or save PDF</Button></div></div><RecipesPrintDocument recipes={store.recipes} store={store} /></div></div>, document.body)}</div>;
+  if (isMobile) { return <div><div className="mb-4 flex items-center justify-between"><h1 className="display text-xl font-semibold">Recipes</h1><span className="flex items-center gap-2"><span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-semibold text-secondary-foreground">{store.recipes.length} recipes</span><Button variant="soft" onClick={() => setPrintView('recipes')} aria-label="Print recipe book"><FileText size={15} /></Button></span></div><div className="mb-3 flex items-center justify-center gap-4 text-[10px] text-muted-foreground"><span className="flex items-center gap-1"><ArrowUpRight size={10} /> Swipe right to edit</span><span className="flex items-center gap-1">Swipe left to delete <ArrowDownRight size={10} /></span></div><div className="mb-4"><div className="mb-2 flex items-center justify-between gap-2"><h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Baking Reference</h2><Button variant="soft" onClick={() => setPrintView('cards')}><FileText size={13} /> Print cards</Button></div><BakingReferenceCards recipes={store.recipes} ingredients={store.ingredients} /></div><div className="space-y-3">{store.recipes.map(r => { const c = costOfRecipe(r, store.ingredients); const issues = recipeCostIssues(r, store.ingredients); return <SwipeableRow key={r.id} onEdit={() => setSelected(r)} onDelete={() => removeRecipe(r)}><Card className="overflow-hidden"><div className="bg-sidebar p-4 text-sidebar-foreground"><div className="flex items-center justify-between"><p className="font-semibold text-sm">{r.name || 'Unnamed recipe'}</p><div className="flex items-center gap-2"><span className="rounded-full bg-sidebar-primary px-2 py-0.5 text-[10px] font-semibold text-sidebar-primary-foreground">yield {r.batchYield}</span>{r.version && r.version > 1 && <button onClick={() => setShowVersionHistory(r)} className="rounded-full bg-sidebar-accent px-2 py-0.5 text-[9px] font-semibold text-sidebar-foreground">v{r.version}</button>}</div></div></div><div className="p-4"><div className="mb-2 flex items-start justify-between gap-3"><span className="text-[10px] text-muted-foreground">Batch cost</span><span className="text-right"><span className="mono text-sm font-semibold">{money(c)}</span>{issues.count > 0 && <span className="mt-0.5 block text-[10px] font-medium text-destructive">{recipeIssueLabel(issues)}</span>}</span></div><p className="text-[10px] text-muted-foreground">{r.ingredients.length} ingredients</p></div></Card></SwipeableRow>; })}{!store.recipes.length && <Empty icon={BookOpen} title="No recipes yet" detail="Link ingredients to products to calculate batch costs." />}</div>{selected && <RecipeModal value={selected} ingredients={store.ingredients} onClose={() => setSelected(null)} onSave={save} />}{showVersionHistory && <RecipeVersionHistory recipe={showVersionHistory} onClose={() => setShowVersionHistory(null)} onRevert={(v) => revertToVersion(showVersionHistory, v)} />}{deletingRecipe && <Modal title="Delete recipe" onClose={cancelDelete}><div className="space-y-4"><p className="text-sm text-muted-foreground">{deleteStep === 1 ? <>Are you sure you want to delete <strong>{deletingRecipe.name}</strong>?</> : <><strong>This cannot be undone.</strong> Type <span className="font-semibold">DELETE</span> to confirm.</>}</p>{deleteStep === 2 && <Input autoFocus placeholder="Type DELETE to confirm" onChange={e => { if (e.target.value === 'DELETE') confirmDeleteStep2(); }} />}<div className="flex justify-end gap-2"><Button variant="ghost" onClick={cancelDelete}>Cancel</Button>{deleteStep === 1 && <Button variant="danger" onClick={confirmDeleteStep1}>Delete</Button>}</div></div></Modal>}{printView === 'recipes' && createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && setPrintView(null)}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Recipes</p><h2 className="display text-2xl font-semibold">Recipe Book</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={() => setPrintView(null)}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Recipe Book")}><FileText size={16} /> Print or save PDF</Button></div></div><RecipesPrintDocument recipes={store.recipes} store={store} /></div></div>, document.body)}{printView === 'cards' && createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && setPrintView(null)}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Baking reference</p><h2 className="display text-2xl font-semibold">Reference Cards</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={() => setPrintView(null)}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Baking Reference Cards")}><FileText size={16} /> Print or save PDF</Button></div></div><BakingReferencePrintDocument recipes={store.recipes} /></div></div>, document.body)}</div>;
   }
-  return <div><PageHeader eyebrow="Bake book" title="Recipes" description="Build batches with costs that update as your pantry prices change." action={<div className="flex gap-2"><Button onClick={() => setSelected(newRecipe())}><Plus size={16} /> Add recipe</Button><Button variant="soft" onClick={() => setShowPrint(true)}><FileText size={16} /> Print all</Button></div>} /><div className="mb-6"><div className="mb-3 flex items-center justify-between"><h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Baking Reference Cards</h2><Button variant="soft" className="text-xs" onClick={() => setShowPrintRef(true)}><FileText size={14} /> Print cards</Button></div><BakingReferenceCards recipes={store.recipes} ingredients={store.ingredients} /></div><div className="grid gap-4 lg:grid-cols-3">{store.recipes.map(r => { const missing = r.ingredients.filter(row => { const i = store.ingredients.find(x => x.id === row.ingredientId); return !i || !unitCost(i); }).length; const c = costOfRecipe(r, store.ingredients); return <Card key={r.id} className="flex flex-col overflow-hidden"><div className="flex items-start justify-between bg-sidebar p-5 text-sidebar-foreground"><div><p className="mono text-[10px] uppercase tracking-wider text-sidebar-foreground/60">Recipe {r.id.replace('recipe-', '').toUpperCase()}</p><h2 className="display mt-2 text-xl font-semibold">{r.name}</h2></div><span className="rounded-full bg-sidebar-primary px-2 py-1 text-[10px] font-semibold text-sidebar-primary-foreground">yield {r.batchYield}</span></div><div className="flex-1 p-5"><div className="mb-4 flex items-center justify-between border-b pb-3"><span className="text-xs text-muted-foreground">Estimated batch cost</span><span className={cx('mono font-semibold', missing > 0 && 'text-muted-foreground')}>{missing ? 'Cost requires ingredient pricing' : money(c)}</span></div><div className="space-y-2">{r.ingredients.slice(0, 5).map(row => <div key={row.ingredientId} className="flex justify-between text-sm"><span className="text-muted-foreground">{store.ingredients.find(i => i.id === row.ingredientId)?.name || 'Unknown ingredient'}</span><span className="mono text-xs">{row.quantity}{row.unit}</span></div>)}{r.ingredients.length > 5 && <p className="pt-1 text-xs text-primary">+ {r.ingredients.length - 5} more ingredients</p>}</div></div><div className="flex items-center justify-between border-t bg-muted/30 px-5 py-3"><span className="text-xs text-muted-foreground">{r.ingredients.length} ingredients</span><Button variant="ghost" className="text-xs" onClick={() => setSelected(r)}><Pencil size={14} /> Edit recipe</Button></div></Card>; })}</div>{selected && <RecipeModal value={selected} ingredients={store.ingredients} onClose={() => setSelected(null)} onSave={save} />}{showPrint && createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && setShowPrint(false)}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Recipes</p><h2 className="display text-2xl font-semibold">Recipe Book</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={() => setShowPrint(false)}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Recipe Book")}><FileText size={16} /> Print or save PDF</Button></div></div><RecipesPrintDocument recipes={store.recipes} store={store} /></div></div>, document.body)}{showPrintRef && createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && setShowPrintRef(false)}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Baking reference</p><h2 className="display text-2xl font-semibold">Reference Cards</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={() => setShowPrintRef(false)}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Baking Reference Cards")}><FileText size={16} /> Print or save PDF</Button></div></div><BakingReferencePrintDocument recipes={store.recipes} /></div></div>, document.body)}</div>;
+  return <div><PageHeader eyebrow="Bake book" title="Recipes" description="Build batches with costs that update as your pantry prices change." action={<div className="flex gap-2"><Button onClick={() => setSelected(newRecipe())}><Plus size={16} /> Add recipe</Button><Button variant="soft" onClick={() => setPrintView('recipes')}><FileText size={16} /> Print all</Button></div>} /><div className="mb-6"><div className="mb-3 flex items-center justify-between"><h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Baking Reference Cards</h2><Button variant="soft" className="text-xs" onClick={() => setPrintView('cards')}><FileText size={14} /> Print cards</Button></div><BakingReferenceCards recipes={store.recipes} ingredients={store.ingredients} /></div><div className="grid gap-4 lg:grid-cols-3">{store.recipes.map(r => { const issues = recipeCostIssues(r, store.ingredients); const c = costOfRecipe(r, store.ingredients); return <Card key={r.id} className="flex flex-col overflow-hidden"><div className="flex items-start justify-between bg-sidebar p-5 text-sidebar-foreground"><div><p className="mono text-[10px] uppercase tracking-wider text-sidebar-foreground/60">Recipe {r.id.replace('recipe-', '').toUpperCase()}</p><h2 className="display mt-2 text-xl font-semibold">{r.name}</h2></div><div className="flex items-center gap-2"><span className="rounded-full bg-sidebar-primary px-2 py-1 text-[10px] font-semibold text-sidebar-primary-foreground">yield {r.batchYield}</span>{r.version && r.version > 1 && <button onClick={() => setShowVersionHistory(r)} className="rounded-full bg-sidebar-accent px-2 py-1 text-[10px] font-semibold text-sidebar-foreground hover:bg-sidebar-primary/20">v{r.version}</button>}</div></div><div className="flex-1 p-5"><div className="mb-4 flex items-start justify-between gap-3 border-b pb-3"><span className="text-xs text-muted-foreground">Estimated batch cost</span><span className="text-right"><span className="mono font-semibold">{money(c)}</span>{issues.count > 0 && <span className="mt-0.5 block text-[10px] font-medium text-destructive">{recipeIssueLabel(issues)}</span>}</span></div><div className="space-y-2">{r.ingredients.slice(0, 5).map(row => <div key={row.ingredientId} className="flex justify-between text-sm"><span className="text-muted-foreground">{store.ingredients.find(i => i.id === row.ingredientId)?.name || 'Unknown ingredient'}</span><span className="mono text-xs">{row.quantity}{row.unit}</span></div>)}{r.ingredients.length > 5 && <p className="pt-1 text-xs text-primary">+ {r.ingredients.length - 5} more ingredients</p>}</div></div><div className="flex items-center justify-between border-t bg-muted/30 px-5 py-3"><span className="text-xs text-muted-foreground">{r.ingredients.length} ingredients</span><Button variant="ghost" className="text-xs" onClick={() => setSelected(r)}><Pencil size={14} /> Edit recipe</Button></div></Card>; })}</div>{selected && <RecipeModal value={selected} ingredients={store.ingredients} onClose={() => setSelected(null)} onSave={save} />}{printView === 'recipes' && createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && setPrintView(null)}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Recipes</p><h2 className="display text-2xl font-semibold">Recipe Book</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={() => setPrintView(null)}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Recipe Book")}><FileText size={16} /> Print or save PDF</Button></div></div><RecipesPrintDocument recipes={store.recipes} store={store} /></div></div>, document.body)}{printView === 'cards' && createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && setPrintView(null)}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Baking reference</p><h2 className="display text-2xl font-semibold">Reference Cards</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={() => setPrintView(null)}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Baking Reference Cards")}><FileText size={16} /> Print or save PDF</Button></div></div><BakingReferencePrintDocument recipes={store.recipes} /></div></div>, document.body)}</div>;
 }
 function RecipeModal({ value, ingredients, onClose, onSave }: { value: Recipe; ingredients: Ingredient[]; onClose: () => void; onSave: (v: Recipe) => void }) {
   const [r, setR] = useState(value); const set = (k: keyof Recipe, v: string | number | boolean) => setR(x => ({ ...x, [k]: v })); const updateRow = (index: number, key: string, val: string | number) => setR(x => ({ ...x, ingredients: x.ingredients.map((row, i) => i === index ? { ...row, [key]: val } : row) }));
-  return <Modal title={value.name ? 'Edit recipe' : 'New recipe'} subtitle="Product details, pricing, and ingredient allocations in one place." onClose={onClose} wide><form onSubmit={e => { e.preventDefault(); onSave(r); }} className="space-y-5"><div className="grid gap-4 sm:grid-cols-2"><Field label="Recipe name"><Input required value={r.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Oat & Raisin Cookies" /></Field><Field label="Category"><Input value={r.category} onChange={e => set('category', e.target.value)} placeholder="e.g. Cookies" /></Field><Field label="Retail price / dozen"><Input type="number" min="0" step=".01" value={r.retailPriceDozen} onChange={e => set('retailPriceDozen', Number(e.target.value))} /></Field><Field label="Wholesale price / dozen"><Input type="number" min="0" step=".01" value={r.wholesalePriceDozen} onChange={e => set('wholesalePriceDozen', Number(e.target.value))} /></Field><Field label="Batch yield (per recipe)"><Input type="number" min="1" value={r.batchYield} onChange={e => set('batchYield', Number(e.target.value))} /></Field><Field label="Serving size"><Input value={r.servingSize} onChange={e => set('servingSize', e.target.value)} /></Field><Field label="Oven temperature" hint="e.g. 170-180°C"><Input value={r.ovenTemp || ''} onChange={e => set('ovenTemp', e.target.value)} placeholder="170-180°C" /></Field><Field label="Bake time (minutes)" hint="Per tray in the oven"><Input type="number" min="0" value={r.bakeTimeMinutes || ''} onChange={e => set('bakeTimeMinutes', Number(e.target.value))} placeholder="14" /></Field></div><Field label="Description"><textarea className="min-h-16 w-full rounded-lg border bg-background p-3 text-sm outline-none focus:border-primary" value={r.description} onChange={e => set('description', e.target.value)} placeholder="Brief description of this recipe" /></Field><div className="border-t pt-4"><p className="text-sm font-semibold mb-3">Ingredients</p><div className="mb-5 grid gap-4 sm:grid-cols-3"><Field label="Dough weight (g)"><Input type="number" value={r.doughWeight} onChange={e => setR({ ...r, doughWeight: Number(e.target.value) })} /></Field><Field label="Finished weight (g)"><Input type="number" value={r.finishedWeight} onChange={e => setR({ ...r, finishedWeight: Number(e.target.value) })} /></Field><div /></div><div className="overflow-x-auto rounded-lg border"><table className="w-full min-w-[480px] text-left text-sm"><thead className="bg-muted text-xs text-muted-foreground"><tr><th className="px-3 py-2">Ingredient</th><th className="w-28">Quantity</th><th className="w-24">Unit</th><th className="w-12" /></tr></thead><tbody className="divide-y">{r.ingredients.map((row, index) => { return <tr key={`${row.ingredientId}-${index}`}><td className="px-3 py-2"><Select value={row.ingredientId} onChange={e => updateRow(index, 'ingredientId', e.target.value)}>{ingredients.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}</Select></td><td><Input type="number" value={row.quantity} onChange={e => updateRow(index, 'quantity', Number(e.target.value))} /></td><td><Input value={row.unit} onChange={e => updateRow(index, 'unit', e.target.value)} /></td><td><IconButton label="Remove ingredient" onClick={() => setR(x => ({ ...x, ingredients: x.ingredients.filter((_, i) => i !== index) }))}><Trash2 size={15} /></IconButton></td></tr>; })}</tbody></table></div><Button type="button" variant="soft" className="mt-3" onClick={() => setR(x => ({ ...x, ingredients: [...x.ingredients, { ingredientId: ingredients[0]?.id || '', quantity: 0, unit: 'g', notes: '' }] }))}><Plus size={15} /> Add ingredient</Button></div><div className="flex justify-end gap-2 pt-2"><Button type="button" variant="ghost" onClick={onClose}>Cancel</Button><Button type="submit"><Check size={16} /> Save recipe</Button></div></form></Modal>;
+  return <Modal title={value.name ? 'Edit recipe' : 'New recipe'} subtitle="Product details, pricing, and ingredient allocations in one place." onClose={onClose} wide><form onSubmit={e => { e.preventDefault(); onSave(r); }} className="space-y-5"><div className="grid gap-4 sm:grid-cols-2"><Field label="Recipe name"><Input required value={r.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Oat & Raisin Cookies" /></Field><Field label="Category"><Input value={r.category} onChange={e => set('category', e.target.value)} placeholder="e.g. Cookies" /></Field><Field label="Retail price / dozen"><Input type="number" min="0" step=".01" value={r.retailPriceDozen} onChange={e => set('retailPriceDozen', Number(e.target.value))} /></Field><Field label="Wholesale price / dozen"><Input type="number" min="0" step=".01" value={r.wholesalePriceDozen} onChange={e => set('wholesalePriceDozen', Number(e.target.value))} /></Field><Field label="Batch yield (per recipe)"><Input type="number" min="1" value={r.batchYield} onChange={e => set('batchYield', Number(e.target.value))} /></Field><Field label="Serving size"><Input value={r.servingSize} onChange={e => set('servingSize', e.target.value)} /></Field><Field label="Oven temperature" hint="e.g. 170-180°C"><Input value={r.ovenTemp || ''} onChange={e => set('ovenTemp', e.target.value)} placeholder="170-180°C" /></Field><Field label="Bake time (minutes)" hint="Per tray in the oven"><Input type="number" min="0" value={r.bakeTimeMinutes || ''} onChange={e => set('bakeTimeMinutes', Number(e.target.value))} placeholder="14" /></Field></div><Field label="Description"><textarea className="min-h-16 w-full rounded-lg border bg-background p-3 text-sm outline-none focus:border-primary" value={r.description} onChange={e => set('description', e.target.value)} placeholder="Brief description of this recipe" /></Field><div className="border-t pt-4"><p className="text-sm font-semibold mb-3">Ingredients</p><div className="mb-5 grid gap-4 sm:grid-cols-3"><Field label="Dough weight (g)"><Input type="number" value={r.doughWeight} onChange={e => setR({ ...r, doughWeight: Number(e.target.value) })} /></Field><Field label="Finished weight (g)"><Input type="number" value={r.finishedWeight} onChange={e => setR({ ...r, finishedWeight: Number(e.target.value) })} /></Field><div /></div><div className="overflow-x-auto rounded-lg border"><table className="w-full min-w-[560px] text-left text-sm"><thead className="bg-muted text-xs text-muted-foreground"><tr><th className="px-3 py-2">Ingredient</th><th className="w-28">Quantity</th><th className="w-24">Unit</th><th className="w-28 text-right">Row cost</th><th className="w-12" /></tr></thead><tbody className="divide-y">{r.ingredients.map((row, index) => { const linked = ingredients.find(x => x.id === row.ingredientId) || null; const line = costOfRow(row, ingredients); const link = (nextId: string) => { const next = ingredients.find(x => x.id === nextId); setR(x => ({ ...x, ingredients: x.ingredients.map(old => old === row ? { ...old, ingredientId: nextId, unit: next ? next.unit : old.unit } : old) })); }; return <tr key={`${row.ingredientId}-${index}`}><td className="px-3 py-2"><Select value={row.ingredientId} onChange={e => link(e.target.value)}>{!linked && <option value={row.ingredientId}>{row.ingredientId} — not in pantry</option>}{ingredients.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}</Select>{!linked && <p className="mt-1 text-[10px] font-medium text-destructive">Link this row to a pantry item to cost it.</p>}</td><td><Input type="number" value={row.quantity} onChange={e => updateRow(index, 'quantity', Number(e.target.value))} /></td><td><Select value={row.unit} onChange={e => updateRow(index, 'unit', e.target.value)}>{!(UNIT_OPTIONS as readonly string[]).includes(row.unit) && <option value={row.unit}>{row.unit}</option>}{UNIT_OPTIONS.map(u => <option key={u} value={u}>{u}</option>)}</Select></td><td className="mono py-2 text-right text-xs">{line.cost !== null ? money(line.cost) : <span className="text-destructive">{line.issue === 'unpriced' ? 'no price' : line.issue === 'unconvertible' ? 'unit fix' : '—'}</span>}</td><td><IconButton label="Remove ingredient" onClick={() => setR(x => ({ ...x, ingredients: x.ingredients.filter((_, i) => i !== index) }))}><Trash2 size={15} /></IconButton></td></tr>; })}</tbody></table></div><Button type="button" variant="soft" className="mt-3" onClick={() => setR(x => ({ ...x, ingredients: [...x.ingredients, { ingredientId: ingredients[0]?.id || '', quantity: 0, unit: 'g', notes: '' }] }))}><Plus size={15} /> Add ingredient</Button></div><div className="flex justify-end gap-2 pt-2"><Button type="button" variant="ghost" onClick={onClose}>Cancel</Button><Button type="submit"><Check size={16} /> Save recipe</Button></div></form></Modal>;
+}
+
+function RecipeVersionHistory({ recipe, onClose, onRevert }: { recipe: Recipe; onClose: () => void; onRevert: (version: RecipeVersion) => void }) {
+  return (
+    <Modal title={`Version History: ${recipe.name}`} subtitle={`Current version: ${recipe.version || 1}`} onClose={onClose}>
+      <div className="space-y-3">
+        {recipe.versionHistory && recipe.versionHistory.length > 0 ? (
+          recipe.versionHistory.slice().reverse().map((versionEntry) => (
+            <div key={versionEntry.version} className="flex items-center justify-between gap-3 p-3 rounded-lg border">
+              <div>
+                <p className="text-sm font-semibold">Version {versionEntry.version}</p>
+                <p className="text-xs text-muted-foreground">{new Date(versionEntry.timestamp).toLocaleString()}</p>
+                <p className="text-xs text-muted-foreground">{versionEntry.changes}</p>
+              </div>
+              <Button variant="soft" className="text-xs" onClick={() => onRevert(versionEntry)}>Revert</Button>
+            </div>
+          ))
+        ) : (
+          <Empty icon={History} title="No version history" detail="This recipe has not been modified yet." />
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+type OrderTemplate = { id: string; name: string; items: OrderItem[]; notes?: string; createdAt?: string };
+
+function TemplateModal({ templates, onClose, onApply, onDelete, onSave }: {
+  templates: OrderTemplate[];
+  onClose: () => void;
+  onApply: (template: OrderTemplate) => void;
+  onDelete: (templateId: string) => void;
+  onSave: (value: { mode: 'create' | 'edit'; template?: OrderTemplate }) => void;
+}) {
+  return (
+    <Modal title="Order templates" subtitle="Start a new invoice from a saved set of items" onClose={onClose}>
+      <div className="space-y-3">
+        <Button variant="soft" className="w-full" onClick={() => onSave({ mode: 'create' })}><Plus size={16} /> New template</Button>
+        {templates.length > 0 ? templates.map(t => (
+          <div key={t.id} className="flex items-center justify-between gap-3 rounded-lg border p-3">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold">{t.name}</p>
+              <p className="text-[10px] text-muted-foreground">{t.items.length} item{t.items.length === 1 ? '' : 's'}{t.notes ? ` · ${t.notes}` : ''}</p>
+            </div>
+            <div className="flex shrink-0 gap-1">
+              <Button variant="soft" className="text-xs" onClick={() => onApply(t)}>Use</Button>
+              <Button variant="ghost" className="text-xs" onClick={() => onSave({ mode: 'edit', template: t })}>Edit</Button>
+              <Button variant="ghost" className="text-xs" onClick={() => onDelete(t.id)}>Delete</Button>
+            </div>
+          </div>
+        )) : <Empty icon={Sparkles} title="No templates yet" detail="Create a template to reuse the same items in one tap." />}
+      </div>
+    </Modal>
+  );
+}
+
+function TemplateEditorModal({ value, store, onClose, onSave }: {
+  value: { mode: 'create' | 'edit'; template?: OrderTemplate };
+  store: Store;
+  onClose: () => void;
+  onSave: (order: Order) => void;
+}) {
+  const [name, setName] = useState(value.template?.name || '');
+  const [notes, setNotes] = useState(value.template?.notes || '');
+  const [items, setItems] = useState<OrderItem[]>(value.template?.items || []);
+  const [productId, setProductId] = useState(store.recipes[0]?.id || '');
+  const [quantity, setQuantity] = useState('1');
+
+  const addItem = () => {
+    const recipe = store.recipes.find(r => r.id === productId);
+    if (!recipe) return;
+    const qty = Math.max(1, Number(quantity) || 1);
+    setItems(prev => [...prev, { productId: recipe.id, quantity: qty, unitPrice: recipe.retailPriceDozen, costSnapshot: roundCurrency(costPerDozen(recipe, store.ingredients)) }]);
+    setQuantity('1');
+  };
+  const removeItem = (idx: number) => setItems(prev => prev.filter((_, i) => i !== idx));
+  const updateItem = (idx: number, key: 'quantity' | 'unitPrice', value2: number) => setItems(prev => prev.map((it, i) => i === idx ? { ...it, [key]: value2 } : it));
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!items.length) return;
+    onSave({ id: value.template?.id || id('order'), customerName: name.trim() || 'Untitled Template', items, notes } as Order);
+    onClose();
+  };
+
+  return (
+    <Modal title={value.mode === 'create' ? 'New template' : 'Edit template'} subtitle="Templates keep the items, name and notes of an order" onClose={onClose}>
+      <form onSubmit={submit} className="space-y-4">
+        <Field label="Template name"><Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Weekly office order" /></Field>
+        <div>
+          <p className="mb-1.5 text-sm font-medium">Items</p>
+          {items.length > 0 && (
+            <div className="mb-2 space-y-1.5">
+              {items.map((it, idx) => {
+                const recipe = store.recipes.find(r => r.id === it.productId);
+                return (
+                  <div key={`${it.productId}-${idx}`} className="flex items-center gap-2 rounded-lg border p-2">
+                    <p className="min-w-0 flex-1 truncate text-sm">{recipe?.name || it.productId}</p>
+                    <Input type="number" min="1" value={it.quantity} onChange={e => updateItem(idx, 'quantity', Math.max(1, Number(e.target.value) || 1))} className="h-8 w-16 px-2 text-right" />
+                    <IconButton label={`Remove ${recipe?.name || 'item'}`} type="button" onClick={() => removeItem(idx)}><X size={14} /></IconButton>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <Select value={productId} onChange={e => setProductId(e.target.value)} className="h-9 flex-1">
+              {store.recipes.map(r => <option key={r.id} value={r.id}>{r.name || 'Unnamed recipe'}</option>)}
+            </Select>
+            <Input type="number" min="1" value={quantity} onChange={e => setQuantity(e.target.value)} className="h-9 w-16 px-2 text-right" />
+            <Button type="button" variant="soft" onClick={addItem} disabled={!store.recipes.length}><Plus size={14} /> Add</Button>
+          </div>
+          {!store.recipes.length && <p className="mt-1 text-xs text-muted-foreground">Add recipes first to build a template.</p>}
+        </div>
+        <Field label="Notes (optional)"><Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="e.g. Deliver Fridays before 10am" /></Field>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button type="submit" disabled={!items.length}>Save template</Button>
+        </div>
+      </form>
+    </Modal>
+  );
 }
 
 function Orders() {
-  const { store, update } = useStore(); const isMobile = useIsMobile(); const [edit, setEdit] = useState<Order | null>(null); const [invoice, setInvoice] = useState<Order | null>(null); const [bakingReport, setBakingReport] = useState<Order | null>(null); const [kitchenOrder, setKitchenOrder] = useState<Order | null>(null); const [search, setSearch] = useState(''); const [location] = useLocation(); const [showImport, setShowImport] = useState(false); const [filter, setFilter] = useState<'all' | 'unpaid' | 'paid' | 'archived'>('all'); const [showOrderForm, setShowOrderForm] = useState(false);
+  const { store, update } = useStore(); const isMobile = useIsMobile(); const [edit, setEdit] = useState<Order | null>(null); const [invoice, setInvoice] = useState<Order | null>(null); const [bakingReport, setBakingReport] = useState<Order | null>(null); const [kitchenOrder, setKitchenOrder] = useState<Order | null>(null); const [search, setSearch] = useState(''); const [location] = useLocation(); const [showImport, setShowImport] = useState(false); const [filter, setFilter] = useState<'all' | 'unpaid' | 'paid' | 'archived'>('all'); const [showOrderForm, setShowOrderForm] = useState(false); const urlSearch = useSearch();
+  const [advancedFilters, setAdvancedFilters] = useState({ dateFrom: '', dateTo: '', minAmount: '', maxAmount: '', priorityFilter: 'all' as 'all' | 'Normal' | 'Rush' | 'Urgent' });
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [templateModal, setTemplateModal] = useState<{ mode: 'create' | 'edit'; template?: any } | null>(null);
   const invoiceSequence = (v: string) => { const m = v.match(/(\d+)\s*$/); return m ? Number(m[1]) : 0; };
   const isOld = (o: Order) => o.archived || (invoiceSequence(o.invoiceNumber) > 0 && invoiceSequence(o.invoiceNumber) < 29);
   const isPaid = (o: Order) => o.paymentStatus?.toLowerCase() === 'paid';
-  const archiveOrder = (o: Order) => update({ orders: store.orders.map(x => x.id === o.id ? { ...x, archived: true } : x), auditLog: [createAuditEntry('Orders', 'archived', o.id, o.customerName, `Archived order ${o.invoiceNumber}`), ...store.auditLog] });
-  const unarchiveOrder = (o: Order) => update({ orders: store.orders.map(x => x.id === o.id ? { ...x, archived: false } : x), auditLog: [createAuditEntry('Orders', 'unarchived', o.id, o.customerName, `Unarchived order ${o.invoiceNumber}`), ...store.auditLog] });
-  const deleteOrder = (o: Order) => { const productNames = o.items.map(item => { const p = store.recipes.find(x => x.id === item.productId); return p ? `${item.quantity}× ${p.name}` : `${item.quantity} items`; }).join(', '); update({ orders: store.orders.map(x => x.id === o.id ? { ...x, archived: true } : x), notifications: [createNotification('Order cancelled', `${o.invoiceNumber} (${o.customerName}) was cancelled.${o.paymentStatus !== 'Paid' ? ' Payment was not received — revenue adjusted.' : ''} Products made: ${productNames}. These products may still be available to sell.`, 'Orders', o.id), ...store.notifications], auditLog: [createAuditEntry('Orders', 'cancelled', o.id, o.customerName, `Cancelled order ${o.invoiceNumber}. Products: ${productNames}`), ...store.auditLog] }); };
+  const reservations = store.reservations;
+  const holdFor = (o: Order) => reservationForOrder(reservations, o.id);
+  const archiveOrder = (o: Order) => update({ orders: store.orders.map(x => x.id === o.id ? { ...x, archived: true } : x), reservations: releaseReservations(reservations, o.id, 'Order archived'), auditLog: [createAuditEntry('Orders', 'archived', o.id, o.customerName, `Archived order ${o.invoiceNumber} — reserved ingredients released`), ...store.auditLog] });
+  const unarchiveOrder = (o: Order) => update({ orders: store.orders.map(x => x.id === o.id ? { ...x, archived: false } : x), reservations: upsertReservation(reservations, o, store.recipes, store.ingredients), auditLog: [createAuditEntry('Orders', 'unarchived', o.id, o.customerName, `Unarchived order ${o.invoiceNumber} — ingredients reserved again`), ...store.auditLog] });
+  const deleteOrder = (o: Order) => { const productNames = o.items.map(item => { const p = store.recipes.find(x => x.id === item.productId); return p ? `${item.quantity}× ${p.name}` : `${item.quantity} items`; }).join(', '); const hold = holdFor(o); const wasBaked = hold?.status === 'issued'; const spentValue = wasBaked ? reservationValue(hold, store.ingredients) : 0; update({ orders: store.orders.map(x => x.id === o.id ? { ...x, archived: true } : x), reservations: releaseReservations(reservations, o.id, 'Customer cancelled', spentValue), notifications: [createNotification('Order cancelled', `${o.invoiceNumber} (${o.customerName}) was cancelled.${o.paymentStatus !== 'Paid' ? ' Payment was not received — revenue adjusted.' : ''} Products made: ${productNames}. These products may still be available to sell. ${wasBaked ? `Ingredients were already baked — ${money(spentValue)} written off as waste.` : 'Reserved ingredients were released back to available stock.'}`, 'Orders', o.id), ...store.notifications], auditLog: [createAuditEntry('Orders', 'cancelled', o.id, o.customerName, `Cancelled order ${o.invoiceNumber}. Products: ${productNames}. ${wasBaked ? `Written off ${money(spentValue)} of baked ingredients as waste.` : 'Reserved ingredients released.'}`), ...store.auditLog] }); };
+  const toggleExcludeRevenue = (o: Order) => {
+    const next = !o.excludeFromRevenue;
+    update({
+      orders: store.orders.map(x => x.id === o.id ? { ...x, excludeFromRevenue: next } : x),
+      auditLog: [createAuditEntry('Orders', next ? 'excluded' : 'included', o.id, o.customerName, `${next ? 'Excluded' : 'Included'} ${o.invoiceNumber} ${next ? 'from' : 'in'} revenue stats. Stock and reservations unchanged.`), ...store.auditLog],
+    });
+  };
+  const markBaked = (o: Order) => { const hold = holdFor(o); if (!hold || hold.status !== 'reserved') return; const stamp = new Date().toISOString(); const transactions: InventoryTransaction[] = hold.lines.map(line => ({ id: id('txn'), ingredientId: line.ingredientId, type: 'use', quantity: line.quantity, date: today(), note: `Baked for ${o.invoiceNumber} — ${o.customerName}` })); const batchNames = hold.lines.length; update({ ingredients: store.ingredients.map(ing => { const line = hold.lines.find(l => l.ingredientId === ing.id); return line ? { ...ing, currentStock: Math.max(0, Math.round((ing.currentStock - line.quantity) * 1000) / 1000) } : ing; }), transactions: [...transactions, ...store.transactions], reservations: issueReservation(reservations, o.id), auditLog: [createAuditEntry('Production', 'baked', o.id, o.customerName, `Issued batch for ${o.invoiceNumber}: ${batchNames} ingredients drawn from stock`), ...store.auditLog], notifications: [createNotification('Batch baked', `${o.invoiceNumber} — ${hold.lines.length} ingredients drawn from stock for ${o.customerName}`, 'Orders', o.id), ...store.notifications] }); void stamp; };
+  const saveAsTemplate = (order: Order) => {
+    const templates = JSON.parse(localStorage.getItem('order-templates') || '[]');
+    const existing = templates.find((t: any) => t.id === order.id);
+    const template = {
+      id: existing ? existing.id : id('tpl'),
+      name: order.customerName || 'Untitled Template',
+      items: order.items,
+      notes: order.notes,
+      createdAt: existing ? existing.createdAt : new Date().toISOString()
+    };
+    const next = existing ? templates.map((t: any) => (t.id === existing.id ? template : t)) : [...templates, template];
+    localStorage.setItem('order-templates', JSON.stringify(next));
+    update({ notifications: [createNotification(existing ? 'Template updated' : 'Template saved', `${template.name} ${existing ? 'was updated' : 'saved as an order template'}`, 'Orders', order.id), ...store.notifications] });
+  };
+  const loadTemplates = () => JSON.parse(localStorage.getItem('order-templates') || '[]');
+  const applyTemplate = (template: any) => {
+    setEdit({
+      id: id('order'),
+      invoiceNumber: formatInvoiceNumber(getNextInvoiceNumber(store)),
+      orderNumber: '',
+      customerName: '',
+      customerAddress: '',
+      customerCity: '',
+      phone: '',
+      orderDate: today(),
+      dueDate: today(),
+      salesRep: '',
+      code: '',
+      fob: '',
+      taxRate: 0,
+      items: template.items.map((item: any) => ({ ...item, costSnapshot: 0 })),
+      discount: 0,
+      deliveryFee: 0,
+      paymentStatus: 'Unpaid',
+      paymentMethod: 'Cash',
+      amountPaid: 0,
+      payments: [],
+      notes: template.notes || '',
+      createdAt: new Date().toISOString(),
+      priority: 'Normal'
+    });
+    setShowTemplates(false);
+  };
+  const deleteTemplate = (templateId: string) => {
+    const templates = loadTemplates().filter((t: any) => t.id !== templateId);
+    localStorage.setItem('order-templates', JSON.stringify(templates));
+    update({});
+  };
   const sorted = [...store.orders].sort((a, b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime() || invoiceSequence(b.invoiceNumber) - invoiceSequence(a.invoiceNumber));
-  const searchFiltered = sorted.filter(o => `${o.customerName} ${o.invoiceNumber} ${o.orderNumber}`.toLowerCase().includes(search.toLowerCase()));
+  const searchFiltered = sorted.filter(o => {
+    const matchesSearch = `${o.customerName} ${o.invoiceNumber} ${o.orderNumber}`.toLowerCase().includes(search.toLowerCase());
+    const matchesDateFrom = !advancedFilters.dateFrom || o.orderDate >= advancedFilters.dateFrom;
+    const matchesDateTo = !advancedFilters.dateTo || o.orderDate <= advancedFilters.dateTo;
+    const total = calculateOrderTotal(o.items, o.discount, o.deliveryFee, o.taxRate || 0);
+    const matchesMinAmount = !advancedFilters.minAmount || total >= Number(advancedFilters.minAmount);
+    const matchesMaxAmount = !advancedFilters.maxAmount || total <= Number(advancedFilters.maxAmount);
+    const matchesPriority = advancedFilters.priorityFilter === 'all' || o.priority === advancedFilters.priorityFilter;
+    return matchesSearch && matchesDateFrom && matchesDateTo && matchesMinAmount && matchesMaxAmount && matchesPriority;
+  });
   const archived = searchFiltered.filter(o => isOld(o));
   const active = searchFiltered.filter(o => !isOld(o));
   const unpaid = active.filter(o => !isPaid(o));
   const paid = active.filter(o => isPaid(o));
   const displayOrders = filter === 'all' ? active : filter === 'unpaid' ? unpaid : filter === 'paid' ? paid : archived;
   const counts = { all: active.length, unpaid: unpaid.length, paid: paid.length, archived: archived.length };
-  const newOrder = () => setEdit({ id: id('order'), invoiceNumber: formatInvoiceNumber(getNextInvoiceNumber(store)), orderNumber: '', customerName: '', customerAddress: '', customerCity: '', phone: '', orderDate: today(), dueDate: today(), salesRep: '', code: '', fob: '', taxRate: 0, items: [{ productId: store.recipes[0]?.id || '', quantity: 1, unitPrice: store.recipes[0]?.retailPriceDozen || 0, costSnapshot: 0 }], discount: 0, deliveryFee: 0, paymentStatus: 'Unpaid', paymentMethod: 'Cash', amountPaid: 0, payments: [], notes: '', createdAt: new Date().toISOString() });
-  useEffect(() => { const params = new URLSearchParams(window.location.search); if (params.get('new') === '1') newOrder(); const invoiceId = params.get('invoice'); const selected = invoiceId ? store.orders.find(order => order.id === invoiceId) : undefined; if (selected) setInvoice(selected); }, [location]);
-  const saveOrder = (order: Order) => { const exists = store.orders.some(x => x.id === order.id); const existingClient = store.clients.find(c => c.name.toLowerCase() === order.customerName.toLowerCase()); const newClient = !exists && order.customerName && !existingClient ? { id: id('cli'), name: order.customerName, address: order.customerAddress, city: order.customerCity, phone: order.phone, email: '', notes: '', createdAt: new Date().toISOString() } : null; update({ orders: exists ? store.orders.map(x => x.id === order.id ? order : x) : [order, ...store.orders], clients: newClient ? [newClient, ...store.clients] : store.clients, settings: { ...store.settings, nextInvoiceNumber: exists ? store.settings.nextInvoiceNumber : getNextInvoiceNumber(store) + 1 }, auditLog: [createAuditEntry('Orders', exists ? 'updated' : 'created', order.id, order.customerName, `${exists ? 'Updated' : 'Created'} order ${order.invoiceNumber} for ${order.customerName}`), ...store.auditLog], notifications: [createNotification(`Order ${exists ? 'updated' : 'created'}`, `${order.invoiceNumber} — ${order.customerName} was ${exists ? 'updated' : 'created'}`, 'Orders', order.id), ...store.notifications] }); setEdit(null); };
-  const renderOrderRow = (o: Order, opts?: { showArchive?: boolean; showUnarchive?: boolean }) => { const total = calculateOrderTotal(o.items, o.discount, o.deliveryFee, o.taxRate || 0); const outstanding = calculateOrderOutstanding(o.items, o.discount, o.deliveryFee, o.taxRate || 0, o.amountPaid); const archived = isOld(o); if (isMobile) { return <Card key={o.id} className="p-4" onClick={() => setInvoice(o)}><div className="flex items-center justify-between mb-2"><div className="flex items-center gap-2.5 min-w-0"><span className={cx('flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold', archived ? 'bg-primary/15 text-primary' : 'bg-secondary text-secondary-foreground')}>{o.customerName.split(' ').map(x => x[0]).join('').slice(0, 2)}</span><div className="min-w-0"><p className={cx('truncate text-sm font-semibold', archived && 'text-primary')}>{o.customerName}</p><p className="text-[10px] text-muted-foreground">{o.invoiceNumber} · {shortDate(o.dueDate)}</p></div></div><Status status={o.paymentStatus} /></div><div className="flex items-center justify-between"><div className="flex gap-3"><div><p className="text-[10px] text-muted-foreground">Total</p><p className="mono text-sm font-semibold">{money(total)}</p></div>{!archived && outstanding > 0 && <div><p className="text-[10px] text-muted-foreground">Due</p><p className="mono text-sm font-semibold text-primary">{money(outstanding)}</p></div>}</div><div className="flex gap-1.5">{opts?.showUnarchive && <IconButton label="Unarchive" onClick={(e) => { e.stopPropagation(); unarchiveOrder(o); }}><RefreshCw size={15} /></IconButton>}{opts?.showArchive && !archived && <IconButton label="Cancel order" onClick={(e) => { e.stopPropagation(); if (window.confirm(`Cancel ${o.invoiceNumber}? The invoice will be kept and products made may still be sold.`)) deleteOrder(o); }}><Trash2 size={15} /></IconButton>}<IconButton label="Preview invoice" onClick={(e) => { e.stopPropagation(); setInvoice(o); }}><FileText size={15} /></IconButton><IconButton label="Edit order" onClick={(e) => { e.stopPropagation(); setEdit(o); }}><Pencil size={15} /></IconButton><IconButton label="Baking report" onClick={(e) => { e.stopPropagation(); setBakingReport(o); }}><ClipboardList size={15} /></IconButton><IconButton label="Kitchen order" onClick={(e) => { e.stopPropagation(); setKitchenOrder(o); }}><BookOpen size={15} /></IconButton></div></div></Card>; } return <tr key={o.id} className={cx('hover:bg-muted/25', archived && 'bg-primary/5')}><td className="px-5 py-4"><p className={cx('font-semibold', archived && 'text-primary')}>{o.invoiceNumber}</p><p className="text-xs text-muted-foreground">{o.customerName} · {o.phone || 'no phone'}</p></td><td><span className={cx(o.dueDate < today() && !isPaid(o) && 'text-destructive')}>{shortDate(o.dueDate)}</span></td><td className="mono">{money(total)}</td><td className="mono">{money(o.amountPaid)}</td><td className="mono text-primary">{money(outstanding)}</td><td><Status status={o.paymentStatus} /></td><td className="pr-5 text-right"><div className="flex gap-1 justify-end">{opts?.showUnarchive && <IconButton label="Unarchive" onClick={() => unarchiveOrder(o)}><RefreshCw size={14} /></IconButton>}{opts?.showArchive && !archived && <IconButton label="Cancel order" onClick={() => { if (window.confirm(`Cancel ${o.invoiceNumber}? The invoice will be kept and products made may still be sold.`)) deleteOrder(o); }}><Trash2 size={14} /></IconButton>}<IconButton label={`Preview ${o.invoiceNumber}`} onClick={() => setInvoice(o)}><FileText size={14} /></IconButton><IconButton label={`Edit ${o.invoiceNumber}`} onClick={() => setEdit(o)}><Pencil size={14} /></IconButton><IconButton label={`Baking report ${o.invoiceNumber}`} onClick={() => setBakingReport(o)}><ClipboardList size={14} /></IconButton><IconButton label={`Kitchen order ${o.invoiceNumber}`} onClick={() => setKitchenOrder(o)}><BookOpen size={14} /></IconButton></div></td></tr>; };
-  if (isMobile) { return <div><div className="mb-4 flex items-center justify-between"><h1 className="display text-xl font-semibold">Orders</h1><div className="flex gap-2"><Button variant="soft" onClick={() => setShowImport(true)}><Upload size={16} /> Import</Button><Button variant="soft" onClick={() => setShowOrderForm(true)}><FileText size={16} /> Form</Button><Button onClick={newOrder}><Plus size={16} /> New</Button></div></div><div className="relative mb-4"><Search className="absolute left-3 top-2.5 text-muted-foreground" size={16} /><Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search orders..." className="pl-9" /></div><div className="flex gap-1.5 mb-4 overflow-x-auto pb-1">{([['all', 'All'], ['unpaid', 'Unpaid'], ['paid', 'Paid'], ['archived', 'Archived']] as const).map(([key, label]) => <button key={key} onClick={() => setFilter(key)} className={cx('shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors', filter === key ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80')}>{label} <span className="ml-1 opacity-60">{counts[key]}</span></button>)}</div>{displayOrders.length > 0 ? <div className="space-y-2">{displayOrders.map(o => renderOrderRow(o, { showArchive: filter !== 'archived', showUnarchive: filter === 'archived' }))}</div> : <Empty icon={Receipt} title={filter === 'unpaid' ? 'All paid up' : filter === 'paid' ? 'No paid orders yet' : filter === 'archived' ? 'No archived orders' : 'No orders yet'} detail={filter === 'unpaid' ? 'Every order has been settled.' : 'Create your first invoice to start tracking sales.'} action={filter !== 'archived' ? <Button onClick={newOrder}><Plus size={16} /> New order</Button> : undefined} />}{edit && <OrderModal value={edit} store={store} onClose={() => setEdit(null)} onSave={saveOrder} />}{invoice && <InvoicePreview order={invoice} store={store} onClose={() => setInvoice(null)} />}{bakingReport && <BakingReport order={bakingReport} store={store} onClose={() => setBakingReport(null)} />}{kitchenOrder && <KitchenOrder order={kitchenOrder} store={store} onClose={() => setKitchenOrder(null)} />}{showImport && <ExcelImportModal store={store} update={update} onClose={() => setShowImport(false)} />}{showOrderForm && createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && setShowOrderForm(false)}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Kitchen order form</p><h2 className="display text-2xl font-semibold">Blank Template</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={() => setShowOrderForm(false)}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Kitchen Order Form")} title="Tip: In the print dialog, disable Headers and footers for a clean print"><FileText size={16} /> Print order form</Button></div></div><KitchenOrderFormDocument numberOfSlots={4} /></div></div>, document.body)}</div>;
+  const newOrder = () => setEdit({ id: id('order'), invoiceNumber: formatInvoiceNumber(getNextInvoiceNumber(store)), orderNumber: '', customerName: '', customerAddress: '', customerCity: '', phone: '', orderDate: today(), dueDate: today(), salesRep: '', code: '', fob: '', taxRate: 0, items: [{ productId: store.recipes[0]?.id || '', quantity: 1, unitPrice: store.recipes[0]?.retailPriceDozen || 0, costSnapshot: 0 }], discount: 0, deliveryFee: 0, paymentStatus: 'Unpaid', paymentMethod: 'Cash', amountPaid: 0, payments: [], notes: '', createdAt: new Date().toISOString(), priority: 'Normal' });
+  useEffect(() => { const params = new URLSearchParams(urlSearch); if (params.get('new') === '1') { newOrder(); clearSearchParam('new'); } const invoiceId = params.get('invoice'); if (invoiceId) { const selected = store.orders.find(order => order.id === invoiceId); if (selected) setInvoice(selected); clearSearchParam('invoice'); } }, [location, urlSearch]);
+  const saveOrder = (order: Order) => { const exists = store.orders.some(x => x.id === order.id); const existingClient = store.clients.find(c => c.name.toLowerCase() === order.customerName.toLowerCase()); const newClient = !exists && order.customerName && !existingClient ? { id: id('cli'), name: order.customerName, address: order.customerAddress, city: order.customerCity, phone: order.phone, email: '', notes: '', createdAt: new Date().toISOString() } : null; const held = upsertReservation(reservations, order, store.recipes, store.ingredients); const short = preBakePlan(order, store.ingredients, store.recipes, reservations).shortageCount; update({ orders: exists ? store.orders.map(x => x.id === order.id ? order : x) : [order, ...store.orders], reservations: held, clients: newClient ? [newClient, ...store.clients] : store.clients, settings: { ...store.settings, nextInvoiceNumber: exists ? store.settings.nextInvoiceNumber : getNextInvoiceNumber(store) + 1 }, auditLog: [createAuditEntry('Orders', exists ? 'updated' : 'created', order.id, order.customerName, `${exists ? 'Updated' : 'Created'} order ${order.invoiceNumber} for ${order.customerName}${short > 0 ? ` — ${short} ingredient(s) short on hand` : ''}`), ...store.auditLog], notifications: [createNotification(`Order ${exists ? 'updated' : 'created'}`, `${order.invoiceNumber} — ${order.customerName} was ${exists ? 'updated' : 'created'}${short > 0 ? `. ${short} ingredient(s) need restocking before baking.` : '. Ingredients reserved.'}`, 'Orders', order.id), ...store.notifications] }); setEdit(null); };
+  const renderOrderRow = (o: Order, opts?: { showArchive?: boolean; showUnarchive?: boolean }) => {
+    const total = calculateOrderTotal(o.items, o.discount, o.deliveryFee, o.taxRate || 0);
+    const outstanding = calculateOrderOutstanding(o.items, o.discount, o.deliveryFee, o.taxRate || 0, o.amountPaid);
+    const archived = isOld(o);
+    if (isMobile) {
+      return (
+        <Card key={o.id} className="p-4" onClick={() => setInvoice(o)}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className={cx('flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold', archived ? 'bg-primary/15 text-primary' : 'bg-secondary text-secondary-foreground')}>
+                {o.customerName.split(' ').map(x => x[0]).join('').slice(0, 2)}
+              </span>
+              <div className="min-w-0">
+                <p className={cx('truncate text-sm font-semibold', archived && 'text-primary')}>{o.customerName}</p>
+                <p className="text-[10px] text-muted-foreground">{o.invoiceNumber} · {shortDate(o.dueDate)}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Status status={o.paymentStatus} />
+              <PriorityBadge priority={o.priority} />
+              {o.excludeFromRevenue && <span className="rounded-full bg-destructive/15 px-2 py-0.5 text-[9px] font-semibold text-destructive">Excluded</span>}
+              <HoldBadge reservation={holdFor(o)} />
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            <div className="flex gap-3">
+              <div>
+                <p className="text-[10px] text-muted-foreground">Total</p>
+                <p className="mono text-sm font-semibold">{money(total)}</p>
+              </div>
+              {!archived && outstanding > 0 && (
+                <div>
+                  <p className="text-[10px] text-muted-foreground">Due</p>
+                  <p className="mono text-sm font-semibold text-primary">{money(outstanding)}</p>
+                </div>
+              )}
+            </div>
+            <div className="flex gap-1.5">
+              <IconButton label={`Edit ${o.invoiceNumber}`} onClick={(e) => { e.stopPropagation(); setEdit(o); }}>
+                <Pencil size={15} />
+              </IconButton>
+              {holdFor(o)?.status === 'reserved' && !archived && (
+                <IconButton label="Mark as baked — draw ingredients from stock" onClick={(e) => { e.stopPropagation(); if (window.confirm(`Mark ${o.invoiceNumber} as baked? Ingredients for this batch will be drawn from stock.`)) markBaked(o); }}>
+                  <Flame size={15} />
+                </IconButton>
+              )}
+              {opts?.showUnarchive && (
+                <IconButton label="Unarchive" onClick={(e) => { e.stopPropagation(); unarchiveOrder(o); }}>
+                  <RefreshCw size={15} />
+                </IconButton>
+              )}
+              {opts?.showArchive && !archived && (
+                <IconButton label="Cancel order" onClick={(e) => { e.stopPropagation(); if (window.confirm(`Cancel ${o.invoiceNumber}? The invoice will be kept and products made may still be sold.`)) deleteOrder(o); }}>
+                  <Trash2 size={15} />
+                </IconButton>
+              )}
+              <IconButton label={o.excludeFromRevenue ? 'Include in revenue' : 'Exclude from revenue'} onClick={(e) => { e.stopPropagation(); toggleExcludeRevenue(o); }}>
+                <EyeOff size={15} />
+              </IconButton>
+              <IconButton label="View invoice" onClick={() => setInvoice(o)}>
+                <Eye size={15} />
+              </IconButton>
+            </div>
+          </div>
+        </Card>
+      );
+    }
+    return (
+      <tr key={o.id} className={cx('hover:bg-muted/25', archived && 'opacity-50')}>
+        <td className="px-5 py-4 text-muted-foreground">{shortDate(o.orderDate)}</td>
+        <td>
+          <div className="flex items-center gap-2">
+            <span className={cx('inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-bold', archived ? 'bg-primary/15 text-primary' : 'bg-secondary text-secondary-foreground')}>
+              {o.customerName.split(' ').map(x => x[0]).join('').slice(0, 2)}
+            </span>
+            <div>
+              <p className={cx('text-sm font-semibold', archived && 'text-primary')}>{o.customerName}</p>
+              <p className="text-[10px] text-muted-foreground">{o.invoiceNumber}</p>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div className="space-y-0.5">
+            <p className="text-xs">{o.items.map(i => { const p = store.recipes.find(x => x.id === i.productId); return p ? `${i.quantity}× ${p.name}` : `${i.quantity} items`; }).join(', ')}</p>
+          </div>
+        </td>
+        <td className="mono">{money(total)}</td>
+        <td><div className="flex flex-wrap items-center gap-1.5"><Status status={o.paymentStatus} /><HoldBadge reservation={holdFor(o)} /></div></td>
+        <td className="pr-5 text-right">
+          <div className="flex items-center justify-end gap-1">
+            <PriorityBadge priority={o.priority} />
+            {o.excludeFromRevenue && <span className="rounded-full bg-destructive/15 px-2 py-0.5 text-[9px] font-semibold text-destructive">Excluded</span>}
+            <IconButton label={`Edit ${o.invoiceNumber}`} onClick={() => setEdit(o)}>
+              <Pencil size={16} />
+            </IconButton>
+            {holdFor(o)?.status === 'reserved' && !archived && (
+              <IconButton label="Mark as baked — draw ingredients from stock" onClick={() => { if (window.confirm(`Mark ${o.invoiceNumber} as baked? Ingredients for this batch will be drawn from stock.`)) markBaked(o); }}>
+                <Flame size={16} />
+              </IconButton>
+            )}
+            <IconButton label={o.excludeFromRevenue ? 'Include in revenue' : 'Exclude from revenue'} onClick={() => toggleExcludeRevenue(o)}>
+              <EyeOff size={16} />
+            </IconButton>
+            <IconButton label="View invoice" onClick={() => setInvoice(o)}>
+              <Eye size={16} />
+            </IconButton>
+            {opts?.showUnarchive && (
+              <IconButton label="Unarchive" onClick={() => unarchiveOrder(o)}>
+                <RefreshCw size={16} />
+              </IconButton>
+            )}
+            {opts?.showArchive && !archived && (
+              <IconButton label="Cancel order" onClick={() => { if (window.confirm(`Cancel ${o.invoiceNumber}?`)) deleteOrder(o); }}>
+                <Trash2 size={16} />
+              </IconButton>
+            )}
+          </div>
+        </td>
+      </tr>
+    );
+  };
+  if (isMobile) {
+    return (
+      <div>
+        <div className="mb-4 flex items-center justify-between">
+          <h1 className="display text-xl font-semibold">Orders</h1>
+          <div className="flex gap-2">
+            <Button variant="soft" onClick={() => setShowImport(true)}><Upload size={16} /> Import</Button>
+            <Button variant="soft" onClick={() => setShowOrderForm(true)}><FileText size={16} /> Form</Button>
+            <Button variant="soft" onClick={() => setShowTemplates(true)} aria-label="Templates"><Sparkles size={16} /></Button>
+            <Button onClick={newOrder}><Plus size={16} /> New</Button>
+          </div>
+        </div>
+        <div className="relative mb-4">
+          <Search className="absolute left-3 top-2.5 text-muted-foreground" size={16} />
+          <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search orders..." className="pl-9" />
+        </div>
+        <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1">
+          {([['all', 'All'], ['unpaid', 'Unpaid'], ['paid', 'Paid'], ['archived', 'Archived']] as const).map(([key, label]) => (
+            <button key={key} onClick={() => setFilter(key)} className={cx('shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors', filter === key ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80')}>
+              {label} <span className="ml-1 opacity-60">{counts[key]}</span>
+            </button>
+          ))}
+        </div>
+        <Button variant="ghost" onClick={() => setShowAdvancedFilters(!showAdvancedFilters)} className="mb-4 w-full"><SlidersHorizontal size={14} /> Advanced filters</Button>
+        {showAdvancedFilters && (
+          <Card className="mb-4 p-4">
+            <div className="grid gap-3">
+              <div className="flex gap-2">
+                <Input type="date" value={advancedFilters.dateFrom} onChange={e => setAdvancedFilters({...advancedFilters, dateFrom: e.target.value})} placeholder="From date" className="flex-1" />
+                <Input type="date" value={advancedFilters.dateTo} onChange={e => setAdvancedFilters({...advancedFilters, dateTo: e.target.value})} placeholder="To date" className="flex-1" />
+              </div>
+              <div className="flex gap-2">
+                <Input type="number" value={advancedFilters.minAmount} onChange={e => setAdvancedFilters({...advancedFilters, minAmount: e.target.value})} placeholder="Min amount" className="flex-1" />
+                <Input type="number" value={advancedFilters.maxAmount} onChange={e => setAdvancedFilters({...advancedFilters, maxAmount: e.target.value})} placeholder="Max amount" className="flex-1" />
+              </div>
+              <Select value={advancedFilters.priorityFilter} onChange={e => setAdvancedFilters({...advancedFilters, priorityFilter: e.target.value as 'all' | 'Normal' | 'Rush' | 'Urgent'})}>
+                <option value="all">All priorities</option>
+                <option value="Normal">Normal</option>
+                <option value="Rush">Rush</option>
+                <option value="Urgent">Urgent</option>
+              </Select>
+              <Button variant="ghost" onClick={() => setAdvancedFilters({ dateFrom: '', dateTo: '', minAmount: '', maxAmount: '', priorityFilter: 'all' })}>Clear filters</Button>
+            </div>
+          </Card>
+        )}
+        {displayOrders.length > 0 ? (
+          <div className="space-y-2">{displayOrders.map(o => renderOrderRow(o, { showArchive: filter !== 'archived', showUnarchive: filter === 'archived' }))}</div>
+        ) : (
+          <Empty icon={Receipt} title={filter === 'unpaid' ? 'All paid up' : filter === 'paid' ? 'No paid orders yet' : filter === 'archived' ? 'No archived orders' : 'No orders yet'} detail={filter === 'unpaid' ? 'Every order has been settled.' : 'Create your first invoice to start tracking sales.'} action={filter !== 'archived' ? <Button onClick={newOrder}><Plus size={16} /> New order</Button> : undefined} />
+        )}
+        {edit && <OrderModal value={edit} store={store} onClose={() => setEdit(null)} onSave={saveOrder} />}
+        {invoice && <InvoicePreview order={invoice} store={store} onClose={() => setInvoice(null)} onEdit={o => { setInvoice(null); setEdit(o); }} onBakingReport={o => { setInvoice(null); setBakingReport(o); }} onKitchenOrder={o => { setInvoice(null); setKitchenOrder(o); }} onToggleExclude={o => { toggleExcludeRevenue(o); setInvoice({ ...o, excludeFromRevenue: !o.excludeFromRevenue }); }} />}
+        {bakingReport && <BakingReport order={bakingReport} store={store} onClose={() => setBakingReport(null)} />}
+        {kitchenOrder && <KitchenOrder order={kitchenOrder} store={store} onClose={() => setKitchenOrder(null)} />}
+        {showImport && <ExcelImportModal store={store} update={update} onClose={() => setShowImport(false)} />}
+        {showOrderForm && createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && setShowOrderForm(false)}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Kitchen order form</p><h2 className="display text-2xl font-semibold">Blank Template</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={() => setShowOrderForm(false)}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Kitchen Order Form", { landscape: true })} title="Tip: In the print dialog, disable Headers and footers for a clean print"><FileText size={16} /> Print order form</Button></div></div><KitchenOrderFormDocument numberOfSlots={4} /></div></div>, document.body)}
+        {showTemplates && <TemplateModal templates={loadTemplates()} onClose={() => setShowTemplates(false)} onApply={applyTemplate} onDelete={deleteTemplate} onSave={setTemplateModal} />}
+        {templateModal && <TemplateEditorModal value={templateModal} store={store} onClose={() => setTemplateModal(null)} onSave={saveAsTemplate} />}
+      </div>
+    );
   }
-  return <div><PageHeader eyebrow="Sales desk" title="Orders" description="Create invoices with the same clean sequence as your Excel book." action={<div className="flex gap-2"><Button variant="soft" onClick={() => setShowImport(true)}><Upload size={16} /> Import Excel</Button><Button variant="soft" onClick={() => setShowOrderForm(true)}><FileText size={16} /> Order form</Button><Button data-testid="button-add-order" onClick={newOrder}><Plus size={17} /> New invoice</Button></div>} /><div className="mb-4 flex items-center gap-3"><div className="relative max-w-sm flex-1"><Search className="absolute left-3 top-3 text-muted-foreground" size={16} /><Input data-testid="input-search-orders" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search customer or invoice no." className="pl-9" /></div></div><div className="mb-4 flex gap-1.5 overflow-x-auto pb-1">{([['all', 'All active'], ['unpaid', 'Unpaid'], ['paid', 'Paid'], ['archived', 'Archived']] as const).map(([key, label]) => <button key={key} onClick={() => setFilter(key)} className={cx('shrink-0 rounded-lg px-4 py-2 text-xs font-semibold transition-colors', filter === key ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80')}>{label} <span className="ml-1 opacity-60">({counts[key]})</span></button>)}</div>{displayOrders.length > 0 ? <Card className="overflow-hidden"><div className="overflow-x-auto"><table className="w-full min-w-[890px] text-left text-sm"><thead className="bg-muted/55 text-xs uppercase tracking-wider text-muted-foreground"><tr><th className="px-5 py-3.5">Invoice</th><th>Due</th><th>Total</th><th>Paid</th><th>Outstanding</th><th>Status</th><th className="pr-5 text-right"> </th></tr></thead><tbody className="divide-y">{displayOrders.map(o => renderOrderRow(o, { showArchive: filter !== 'archived', showUnarchive: filter === 'archived' }))}</tbody></table></div></Card> : <Card className="flex min-h-[240px] items-center justify-center"><Empty icon={Receipt} title={filter === 'unpaid' ? 'All paid up' : filter === 'paid' ? 'No paid orders yet' : filter === 'archived' ? 'No archived orders' : 'No orders yet'} detail={filter === 'unpaid' ? 'Every order has been settled.' : 'Create your first invoice to start tracking sales.'} action={filter !== 'archived' ? <Button onClick={newOrder}><Plus size={16} /> New order</Button> : undefined} /></Card>}{edit && <OrderModal value={edit} store={store} onClose={() => setEdit(null)} onSave={saveOrder} />}{invoice && <InvoicePreview order={invoice} store={store} onClose={() => setInvoice(null)} />}{bakingReport && <BakingReport order={bakingReport} store={store} onClose={() => setBakingReport(null)} />}{kitchenOrder && <KitchenOrder order={kitchenOrder} store={store} onClose={() => setKitchenOrder(null)} />}{showImport && <ExcelImportModal store={store} update={update} onClose={() => setShowImport(false)} />}{showOrderForm && createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && setShowOrderForm(false)}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Kitchen order form</p><h2 className="display text-2xl font-semibold">Blank Template</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={() => setShowOrderForm(false)}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Kitchen Order Form")} title="Tip: In the print dialog, disable Headers and footers for a clean print"><FileText size={16} /> Print order form</Button></div></div><KitchenOrderFormDocument numberOfSlots={4} /></div></div>, document.body)}</div>;
-
-
+  return (
+    <div>
+      <PageHeader eyebrow="Sales desk" title="Orders" description="Create invoices with the same clean sequence as your Excel book." action={<div className="flex gap-2"><Button variant="soft" onClick={() => setShowImport(true)}><Upload size={16} /> Import Excel</Button><Button variant="soft" onClick={() => setShowOrderForm(true)}><FileText size={16} /> Order form</Button><Button variant="soft" onClick={() => setShowTemplates(true)}><Sparkles size={16} /> Templates</Button><Button data-testid="button-add-order" onClick={newOrder}><Plus size={17} /> New invoice</Button></div>} />
+      <div className="mb-4 flex items-center gap-3">
+        <div className="relative max-w-sm flex-1">
+          <Search className="absolute left-3 top-3 text-muted-foreground" size={16} />
+          <Input data-testid="input-search-orders" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search customer or invoice no." className="pl-9" />
+        </div>
+      </div>
+      <div className="mb-4 flex gap-1.5 overflow-x-auto pb-1">
+        {([['all', 'All active'], ['unpaid', 'Unpaid'], ['paid', 'Paid'], ['archived', 'Archived']] as const).map(([key, label]) => (
+          <button key={key} onClick={() => setFilter(key)} className={cx('shrink-0 rounded-lg px-4 py-2 text-xs font-semibold transition-colors', filter === key ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80')}>
+            {label} <span className="ml-1 opacity-60">({counts[key]})</span>
+          </button>
+        ))}
+      </div>
+      <Button variant="ghost" onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}><SlidersHorizontal size={14} /> Advanced filters</Button>
+      {showAdvancedFilters && (
+        <Card className="mb-4 p-4">
+          <div className="grid gap-3 sm:grid-cols-4">
+            <div><Field label="From date"><Input type="date" value={advancedFilters.dateFrom} onChange={e => setAdvancedFilters({...advancedFilters, dateFrom: e.target.value})} /></Field></div>
+            <div><Field label="To date"><Input type="date" value={advancedFilters.dateTo} onChange={e => setAdvancedFilters({...advancedFilters, dateTo: e.target.value})} /></Field></div>
+            <div><Field label="Min amount"><Input type="number" value={advancedFilters.minAmount} onChange={e => setAdvancedFilters({...advancedFilters, minAmount: e.target.value})} /></Field></div>
+            <div><Field label="Max amount"><Input type="number" value={advancedFilters.maxAmount} onChange={e => setAdvancedFilters({...advancedFilters, maxAmount: e.target.value})} /></Field></div>
+            <div className="sm:col-span-2"><Field label="Priority"><Select value={advancedFilters.priorityFilter} onChange={e => setAdvancedFilters({...advancedFilters, priorityFilter: e.target.value as 'all' | 'Normal' | 'Rush' | 'Urgent'})}><option value="all">All priorities</option><option value="Normal">Normal</option><option value="Rush">Rush</option><option value="Urgent">Urgent</option></Select></Field></div>
+            <div className="sm:col-span-2 flex items-end"><Button variant="ghost" onClick={() => setAdvancedFilters({ dateFrom: '', dateTo: '', minAmount: '', maxAmount: '', priorityFilter: 'all' })}>Clear filters</Button></div>
+          </div>
+        </Card>
+      )}
+      <Card className="overflow-hidden">
+        {displayOrders.length ? (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-left text-sm">
+              <thead className="bg-muted/55 text-xs uppercase tracking-wider text-muted-foreground">
+                <tr><th className="px-5 py-3.5">Date</th><th>Customer</th><th>Items</th><th>Total</th><th>Status</th><th className="pr-5 text-right"> </th></tr>
+              </thead>
+              <tbody className="divide-y">{displayOrders.map(o => renderOrderRow(o, { showArchive: filter !== 'archived', showUnarchive: filter === 'archived' }))}</tbody>
+            </table>
+          </div>
+        ) : (
+          <Empty icon={Receipt} title={filter === 'unpaid' ? 'All paid up' : filter === 'paid' ? 'No paid orders yet' : filter === 'archived' ? 'No archived orders' : 'No orders yet'} detail={filter === 'unpaid' ? 'Every order has been settled.' : 'Create your first invoice to start tracking sales.'} action={filter !== 'archived' ? <Button onClick={newOrder}><Plus size={16} /> New order</Button> : undefined} />
+        )}
+      </Card>
+      {edit && <OrderModal value={edit} store={store} onClose={() => setEdit(null)} onSave={saveOrder} />}
+      {invoice && <InvoicePreview order={invoice} store={store} onClose={() => setInvoice(null)} onEdit={o => { setInvoice(null); setEdit(o); }} onBakingReport={o => { setInvoice(null); setBakingReport(o); }} onKitchenOrder={o => { setInvoice(null); setKitchenOrder(o); }} onToggleExclude={o => { toggleExcludeRevenue(o); setInvoice({ ...o, excludeFromRevenue: !o.excludeFromRevenue }); }} />}
+      {bakingReport && <BakingReport order={bakingReport} store={store} onClose={() => setBakingReport(null)} />}
+      {kitchenOrder && <KitchenOrder order={kitchenOrder} store={store} onClose={() => setKitchenOrder(null)} />}
+      {showImport && <ExcelImportModal store={store} update={update} onClose={() => setShowImport(false)} />}
+      {showTemplates && <TemplateModal templates={loadTemplates()} onClose={() => setShowTemplates(false)} onApply={applyTemplate} onDelete={deleteTemplate} onSave={setTemplateModal} />}
+      {templateModal && <TemplateEditorModal value={templateModal} store={store} onClose={() => setTemplateModal(null)} onSave={saveAsTemplate} />}
+      {showOrderForm && createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && setShowOrderForm(false)}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Kitchen order form</p><h2 className="display text-2xl font-semibold">Blank Template</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={() => setShowOrderForm(false)}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Kitchen Order Form", { landscape: true })} title="Tip: In the print dialog, disable Headers and footers for a clean print"><FileText size={16} /> Print order form</Button></div></div><KitchenOrderFormDocument numberOfSlots={4} /></div></div>, document.body)}
+    </div>
+  );
 }
 function BakingReport({ order, store, onClose }: { order: Order; store: Store; onClose: () => void }) {
   return createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Baking report</p><h2 className="display text-2xl font-semibold">{order.invoiceNumber}</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={onClose}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Baking Report - " + order.invoiceNumber)}><FileText size={16} /> Print or save PDF</Button></div></div><BakingReportDocument order={order} store={store} /></div></div>, document.body);
@@ -459,77 +995,219 @@ function BakingReport({ order, store, onClose }: { order: Order; store: Store; o
 function KitchenOrder({ order, store, onClose }: { order: Order; store: Store; onClose: () => void }) {
   return createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Kitchen order</p><h2 className="display text-2xl font-semibold">{order.invoiceNumber}</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={onClose}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Kitchen Order - " + order.invoiceNumber)}><FileText size={16} /> Print for kitchen</Button></div></div><KitchenOrderDocument order={order} store={store} /></div></div>, document.body);
 }
-function OrderModal({ value, store, onClose, onSave }: { value: Order; store: Store; onClose: () => void; onSave: (v: Order) => void }) {
-  const [o, setO] = useState(value); const [pasteText, setPasteText] = useState(''); const [showPaste, setShowPaste] = useState(!value.customerName); const [expandedItem, setExpandedItem] = useState<number | null>(0); const total = calculateOrderTotal(o.items, o.discount, o.deliveryFee, o.taxRate || 0); const set = (k: keyof Order, v: string | number) => setO(x => ({ ...x, [k]: v }));
-  const snapshot = (item: Order['items'][number]) => { const r = store.recipes.find(x => x.id === item.productId); return r ? roundCurrency(costOfRecipe(r, store.ingredients)) : item.costSnapshot; };
-  const updateItem = (idx: number, key: string, val: string | number) => setO(x => ({ ...x, items: x.items.map((row, i) => i === idx ? { ...row, [key]: val } : row) }));
-  const handlePasteParse = () => { if (!pasteText.trim()) return; const parsed = parseOrderText(pasteText, store.recipes); setO(current => ({ ...current, customerName: parsed.customerName || current.customerName, items: parsed.items.map(i => ({ ...i, costSnapshot: (() => { const r = store.recipes.find(x => x.id === i.productId); return r ? roundCurrency(costOfRecipe(r, store.ingredients)) : 0; })() })), dueDate: parsed.dueDate || current.dueDate, notes: parsed.notes || current.notes })); setShowPaste(false); setPasteText(''); };
-  const addItem = () => { setO(x => ({ ...x, items: [...x.items, { productId: store.recipes[0]?.id || '', quantity: 1, unitPrice: store.recipes[0]?.retailPriceDozen || 0, costSnapshot: 0 }] })); setExpandedItem(o.items.length); };
-  return <Modal title={value.customerName ? `Edit ${value.orderNumber}` : 'New customer order'} subtitle="Save a price snapshot so this order stays historically accurate." onClose={onClose} wide><form onSubmit={e => { e.preventDefault(); onSave({ ...o, items: o.items.map(item => ({ ...item, costSnapshot: snapshot(item) })) }); }}>{showPaste && <div className="mb-5 rounded-xl border border-dashed border-primary/40 bg-primary/5 p-4"><div className="mb-3 flex items-center justify-between"><div className="flex items-center gap-2"><span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/15 text-primary"><Upload size={14} /></span><p className="text-sm font-semibold">Paste a WhatsApp order</p></div><button type="button" onClick={() => setShowPaste(false)} className="text-xs text-muted-foreground hover:text-foreground">Skip</button></div><p className="mb-3 text-xs text-muted-foreground">Paste the message — auto-detects customer, products, quantities, and delivery date.</p><textarea value={pasteText} onChange={e => setPasteText(e.target.value)} placeholder={'e.g.\nHi, I need 5 boxes Oat Raisin Cookies and 2 boxes Jam Tarts for Friday'} className="min-h-24 w-full rounded-lg border bg-background p-3 text-sm outline-none placeholder:text-muted-foreground/50 focus:border-primary focus:ring-2 focus:ring-primary/15" /><div className="mt-3 flex items-center gap-2"><Button type="button" onClick={handlePasteParse} disabled={!pasteText.trim()}><Sparkles size={14} /> Parse order</Button><Button type="button" variant="ghost" onClick={() => { setShowPaste(false); setPasteText(''); }}>Enter manually</Button></div></div>}{!showPaste && <div className="mb-4 flex items-center gap-2"><button type="button" onClick={() => setShowPaste(true)} className="flex items-center gap-1.5 rounded-lg border border-dashed border-muted-foreground/30 px-3 py-1.5 text-xs text-muted-foreground hover:border-primary hover:text-primary transition-colors"><Upload size={12} /> Paste WhatsApp order</button></div>}
-      <div className="grid gap-4 sm:grid-cols-3">{store.clients.length > 0 && !o.customerName && <div className="sm:col-span-3"><Field label="Choose a saved client (optional)"><Select value="" onChange={e => { const c = store.clients.find(x => x.id === e.target.value); if (c) setO(current => ({ ...current, customerName: c.name, customerAddress: c.address, customerCity: c.city, phone: c.phone })); }}><option value="">— Type manually or pick a client —</option>{store.clients.sort((a, b) => a.name.localeCompare(b.name)).map(c => <option key={c.id} value={c.id}>{c.name}{c.city ? ` (${c.city})` : ''}</option>)}</Select></Field></div>}<Field label="Customer name"><Input required value={o.customerName} onChange={e => set('customerName', e.target.value)} /></Field><Field label="Phone"><Input value={o.phone} onChange={e => set('phone', e.target.value)} /></Field><Field label="Order number"><Input value={o.orderNumber} onChange={e => set('orderNumber', e.target.value)} /></Field><Field label="Order date"><Input type="date" value={o.orderDate} onChange={e => set('orderDate', e.target.value)} /></Field><Field label="Due date"><Input type="date" value={o.dueDate} onChange={e => set('dueDate', e.target.value)} /></Field><Field label="Payment status"><Select value={o.paymentStatus} onChange={e => set('paymentStatus', e.target.value)}><option>Unpaid</option><option>Part paid</option><option>Paid</option></Select></Field></div>
-      <div className="my-5 rounded-xl border"><div className="flex items-center justify-between border-b bg-muted/35 px-4 py-3"><p className="text-sm font-semibold">Items ({o.items.length})</p><Button type="button" variant="soft" className="min-h-8 px-2.5 text-xs" onClick={addItem}><Plus size={14} /> Add item</Button></div><div className="divide-y">{o.items.map((item, idx) => { const isExpanded = expandedItem === idx; const product = store.recipes.find(p => p.id === item.productId); const itemTotal = item.quantity * item.unitPrice; return <div key={idx} className={cx('transition-colors', isExpanded && 'bg-muted/20')}><div className="flex items-center gap-3 px-4 py-3 cursor-pointer" onClick={() => setExpandedItem(isExpanded ? null : idx)}><div className="flex-1 min-w-0"><p className="text-sm font-semibold truncate">{product?.name || 'Select product'}</p><p className="text-[10px] text-muted-foreground">{item.quantity} × {money(item.unitPrice)} = {money(itemTotal)}</p></div><div className="flex items-center gap-2"><span className="mono text-sm font-semibold">{money(itemTotal)}</span><ChevronRight size={14} className={cx('text-muted-foreground transition-transform', isExpanded && 'rotate-90')} /></div></div>{isExpanded && <div className="px-4 pb-4 pt-1 grid items-end gap-3 sm:grid-cols-[1fr_100px_120px_30px]"><Field label="Product"><Select value={item.productId} onChange={e => { const p = store.recipes.find(x => x.id === e.target.value); updateItem(idx, 'productId', e.target.value); updateItem(idx, 'unitPrice', p?.retailPriceDozen || 0); }}>{store.recipes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</Select></Field><Field label="Qty"><Input type="number" min="0.01" step=".01" value={item.quantity} onChange={e => updateItem(idx, 'quantity', Number(e.target.value))} /></Field><Field label="Unit price"><Input type="number" min="0" step=".01" value={item.unitPrice} onChange={e => updateItem(idx, 'unitPrice', Number(e.target.value))} /></Field><IconButton label="Remove item" type="button" onClick={() => { setO(x => ({ ...x, items: x.items.filter((_, i) => i !== idx) })); setExpandedItem(null); }}><Trash2 size={15} /></IconButton></div>}</div>; })}</div></div>
-      <div className="grid gap-4 sm:grid-cols-3"><Field label="Discount"><Input type="number" min="0" step=".01" value={o.discount} onChange={e => set('discount', Number(e.target.value))} /></Field><Field label="Delivery fee"><Input type="number" min="0" step=".01" value={o.deliveryFee} onChange={e => set('deliveryFee', Number(e.target.value))} /></Field><Field label="Amount paid"><Input type="number" min="0" step=".01" value={o.amountPaid} onChange={e => set('amountPaid', Number(e.target.value))} /></Field></div>
-      <div className="flex justify-end gap-2 mt-4"><Button type="button" variant="ghost" onClick={onClose}>Cancel</Button><Button type="submit">Save invoice</Button></div>
-    </form></Modal>;
+function PreBakeCheck({ plan, hold, isNew }: { plan: PreBakePlan; hold?: MaterialReservation; isNew: boolean }) {
+  const [open, setOpen] = useState(true);
+  const problem = plan.missingCount > 0 || plan.shortageCount > 0 || plan.unconvertibleCount > 0;
+  const tone = problem ? 'border-destructive/40 bg-destructive/5' : 'border-emerald-300 bg-emerald-50';
+  const head = plan.missingCount > 0 ? `${plan.missingCount} missing ingredient${plan.missingCount !== 1 ? 's' : ''}`
+    : plan.unconvertibleCount > 0 ? `${plan.unconvertibleCount} ingredient${plan.unconvertibleCount !== 1 ? 's' : ''} with a unit mismatch`
+    : plan.shortageCount > 0 ? `Short ${plan.shortageCount} ingredient${plan.shortageCount !== 1 ? 's' : ''}`
+    : 'All ingredients available';
+  return (
+    <div className={cx('my-5 rounded-xl border', tone)}>
+      <button type="button" onClick={() => setOpen(!open)} className="flex w-full items-center gap-3 px-4 py-3 text-left">
+        <span className={cx('flex h-8 w-8 shrink-0 items-center justify-center rounded-lg', problem ? 'bg-destructive/15 text-destructive' : 'bg-emerald-600/15 text-emerald-700')}>
+          {problem ? <CircleAlert size={16} /> : <Check size={16} />}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold">Pre-bake check</p>
+          <p className={cx('text-[11px] font-medium', problem ? 'text-destructive' : 'text-emerald-800')}>{head}</p>
+        </div>
+        <div className="hidden text-right sm:block">
+          <p className="mono text-xs font-semibold">{plan.totalBatches} batch{plan.totalBatches !== 1 ? 'es' : ''}</p>
+          <p className="text-[10px] text-muted-foreground">{money(plan.requiredCost)} at risk</p>
+        </div>
+        <ChevronDown size={16} className={cx('text-muted-foreground transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div className="border-t px-4 py-3">
+          <div className="mb-3 flex flex-wrap gap-x-5 gap-y-1 text-[11px]">
+            <span className="text-muted-foreground">Batches: <span className="mono font-semibold text-foreground">{plan.totalBatches}</span></span>
+            <span className="text-muted-foreground">Ingredient cost: <span className="mono font-semibold text-foreground">{money(plan.requiredCost)}</span></span>
+            {plan.shortfallCost > 0 && <span className="text-muted-foreground">Cost of the gap: <span className="mono font-semibold text-destructive">{money(plan.shortfallCost)}</span></span>}
+            {plan.unpricedCount > 0 && <span className="text-muted-foreground">Unpriced: <span className="font-semibold text-foreground">{plan.unpricedCount}</span></span>}
+          </div>
+          {plan.batches.length > 0 && (
+            <div className="mb-3 flex flex-wrap gap-1.5">
+              {plan.batches.map((b, i) => <span key={`${b.recipe.id}-${i}`} className="rounded-full bg-background/70 px-2 py-0.5 text-[10px] font-semibold">{b.batches}× {b.recipe.name}{b.surplus > 0 ? ` (+${b.surplus} spare)` : ''}</span>)}
+            </div>
+          )}
+          {plan.lines.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-[11px]">
+                <thead className="text-[9px] uppercase tracking-wider text-muted-foreground">
+                  <tr><th className="pb-1.5 font-medium">Ingredient</th><th className="pb-1.5 text-right font-medium">Needed</th><th className="pb-1.5 text-right font-medium">On hand</th><th className="pb-1.5 text-right font-medium">Held</th><th className="pb-1.5 text-right font-medium">Free</th><th className="pb-1.5 text-right font-medium">Gap</th></tr>
+                </thead>
+                <tbody className="divide-y">
+                  {plan.lines.map(l => <tr key={l.ingredientId} className={cx(!l.sufficient && 'bg-destructive/5')}>
+                    <td className="py-1.5 pr-2 font-medium">
+                      {l.ingredientName}
+                      {l.missing && <span className="ml-1 text-destructive">(not in pantry)</span>}
+                      {l.unitMismatch && <span className="ml-1 text-destructive">(unit mismatch — {l.unconvertibleRows} row{l.unconvertibleRows !== 1 ? 's' : ''} not counted)</span>}
+                      {l.unitCost === null && !l.missing && <span className="ml-1 text-muted-foreground">(no price)</span>}
+                    </td>
+                    <td className="mono py-1.5 text-right">{l.required.toLocaleString()} {l.unit}</td>
+                    <td className="mono py-1.5 text-right text-muted-foreground">{l.onHand.toLocaleString()}</td>
+                    <td className="mono py-1.5 text-right text-muted-foreground">{l.reservedElsewhere > 0 ? l.reservedElsewhere.toLocaleString() : '—'}</td>
+                    <td className="mono py-1.5 text-right">{l.available.toLocaleString()}</td>
+                    <td className={cx('mono py-1.5 text-right font-semibold', l.shortfall > 0 ? 'text-destructive' : 'text-muted-foreground')}>{l.shortfall > 0 ? l.shortfall.toLocaleString() : '—'}</td>
+                  </tr>)}
+                </tbody>
+              </table>
+            </div>
+          ) : <p className="text-[11px] text-muted-foreground">Add an item to see what this batch needs.</p>}
+          <p className="mt-3 text-[10px] leading-relaxed text-muted-foreground">
+            {hold?.status === 'issued'
+              ? 'Already baked — the ingredients for this batch have been drawn from stock and will not be held again.'
+              : hold?.status === 'reserved'
+                ? 'Saving updates the existing hold for this order.'
+                : isNew
+                  ? 'Saving this order reserves these ingredients so no other order can spend them. Nothing leaves stock until you mark the batch as baked.'
+                  : 'Saving this order reserves these ingredients. Nothing leaves stock until you mark the batch as baked.'}
+          </p>
+        </div>
+      )}
+    </div>
+  );
 }
-
-function InvoiceOrderModal({ value, store, onClose, onSave }: { value: Order; store: Store; onClose: () => void; onSave: (v: Order) => void }) {
-  const [order, setOrder] = useState(value);
+function OrderModal({ value, store, onClose, onSave }: { value: Order; store: Store; onClose: () => void; onSave: (v: Order) => void }) {
+  const [o, setO] = useState(value);
   const [pasteText, setPasteText] = useState('');
   const [showPaste, setShowPaste] = useState(!value.customerName);
   const [expandedItem, setExpandedItem] = useState<number | null>(0);
-  const total = calculateOrderTotal(order.items, order.discount, order.deliveryFee, order.taxRate || 0);
-  const set = <K extends keyof Order>(key: K, val: Order[K]) => setOrder(current => ({ ...current, [key]: val }));
-  const snapshot = (item: Order['items'][number]) => {
-    const recipe = store.recipes.find(r => r.id === item.productId);
-    return recipe ? roundCurrency(costOfRecipe(recipe, store.ingredients)) : item.costSnapshot;
-  };
-  const updateItem = (index: number, patch: Partial<Order['items'][number]>) => setOrder(current => ({ ...current, items: current.items.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item) }));
-  const handlePasteParse = () => {
-    if (!pasteText.trim()) return;
-    const parsed = parseOrderText(pasteText, store.recipes);
-    setOrder(current => ({
-      ...current,
-      customerName: parsed.customerName || current.customerName,
-      items: parsed.items.map(i => ({ ...i, costSnapshot: (() => { const r = store.recipes.find(x => x.id === i.productId); return r ? roundCurrency(costOfRecipe(r, store.ingredients)) : 0; })() })),
-      dueDate: parsed.dueDate || current.dueDate,
-      notes: parsed.notes || current.notes,
-    }));
-    setShowPaste(false);
-    setPasteText('');
-  };
-  const addItem = () => { setOrder(current => ({ ...current, items: [...current.items, { productId: store.recipes[0]?.id || '', quantity: 1, unitPrice: store.recipes[0]?.retailPriceDozen || 0, costSnapshot: 0 }] })); setExpandedItem(order.items.length); };
-  return <Modal title={value.customerName ? `Edit ${value.invoiceNumber}` : 'New bakery invoice'} subtitle="Invoice numbers follow your Excel sequence and cannot be accidentally overwritten." onClose={onClose} wide>
-    <form onSubmit={event => { event.preventDefault(); onSave({ ...order, items: order.items.map(item => ({ ...item, costSnapshot: snapshot(item) })) }); }}>
-      {showPaste && <div className="mb-5 rounded-xl border border-dashed border-primary/40 bg-primary/5 p-4"><div className="mb-3 flex items-center justify-between"><div className="flex items-center gap-2"><span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/15 text-primary"><Upload size={14} /></span><p className="text-sm font-semibold">Paste a WhatsApp order</p></div><button type="button" onClick={() => setShowPaste(false)} className="text-xs text-muted-foreground hover:text-foreground">Skip manual entry</button></div><p className="mb-3 text-xs text-muted-foreground">Paste the message below — the app will auto-detect customer, products, quantities, and delivery date.</p><textarea value={pasteText} onChange={e => setPasteText(e.target.value)} placeholder={'e.g.\nHi, I need 5 boxes Oat Raisin Cookies and 2 boxes Jam Tarts for Friday'} className="min-h-24 w-full rounded-lg border bg-background p-3 text-sm outline-none placeholder:text-muted-foreground/50 focus:border-primary focus:ring-2 focus:ring-primary/15" /><div className="mt-3 flex items-center gap-2"><Button type="button" onClick={handlePasteParse} disabled={!pasteText.trim()}><Sparkles size={14} /> Parse order</Button><Button type="button" variant="ghost" onClick={() => { setShowPaste(false); setPasteText(''); }}>Enter manually</Button></div></div>}
-      {!showPaste && <div className="mb-4 flex items-center gap-2"><button type="button" onClick={() => setShowPaste(true)} className="flex items-center gap-1.5 rounded-lg border border-dashed border-muted-foreground/30 px-3 py-1.5 text-xs text-muted-foreground hover:border-primary hover:text-primary transition-colors"><Upload size={12} /> Paste WhatsApp order</button></div>}
-      <div className="mb-4 rounded-lg bg-secondary/45 px-4 py-3"><div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-secondary-foreground">Invoice number</p><p className="mono mt-1 text-lg font-semibold">{order.invoiceNumber}</p></div><span className="text-right text-xs text-secondary-foreground">Auto-assigned<br />next available number</span></div></div>
-      {store.clients.length > 0 && !order.customerName && <div className="mb-4"><Field label="Choose a saved client (optional)"><Select value="" onChange={event => { const c = store.clients.find(x => x.id === event.target.value); if (c) setOrder(current => ({ ...current, customerName: c.name, customerAddress: c.address, customerCity: c.city, phone: c.phone })); }}><option value="">— Type manually or pick a client —</option>{store.clients.sort((a, b) => a.name.localeCompare(b.name)).map(c => <option key={c.id} value={c.id}>{c.name}{c.city ? ` (${c.city})` : ''}</option>)}</Select></Field></div>}
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Field label="Customer name"><Input required value={order.customerName} onChange={event => set('customerName', event.target.value)} /></Field>
-        <Field label="Address"><Input value={order.customerAddress} onChange={event => set('customerAddress', event.target.value)} /></Field>
-        <Field label="City"><Input value={order.customerCity} onChange={event => set('customerCity', event.target.value)} /></Field>
-        <Field label="Phone"><Input value={order.phone} onChange={event => set('phone', event.target.value)} /></Field>
-        <Field label="Customer order no." hint="Optional reference from the customer"><Input value={order.orderNumber} onChange={event => set('orderNumber', event.target.value)} /></Field>
-        <Field label="Order date"><Input type="date" value={order.orderDate} onChange={event => set('orderDate', event.target.value)} /></Field>
-        <Field label="Due date"><Input type="date" value={order.dueDate} onChange={event => set('dueDate', event.target.value)} /></Field>
-        <Field label="Payment status"><Select value={order.paymentStatus} onChange={event => set('paymentStatus', event.target.value)}><option>Unpaid</option><option>Deposit Paid</option><option>Partially Paid</option><option>Paid</option></Select></Field>
-        <Field label="Payment method"><Select value={order.paymentMethod} onChange={event => set('paymentMethod', event.target.value)}><option>Cash</option><option>Check</option><option>Credit</option><option>Other</option><option>Mobile money</option><option>Bank transfer</option></Select></Field>
-        <Field label="Sales rep"><Input value={order.salesRep} onChange={event => set('salesRep', event.target.value)} /></Field>
-        <Field label="Code"><Input value={order.code} onChange={event => set('code', event.target.value)} /></Field>
-        <Field label="FOB"><Input value={order.fob} onChange={event => set('fob', event.target.value)} placeholder="Optional" /></Field>
-        <Field label="Tax rate (%)"><Input type="number" min="0" step=".01" value={order.taxRate} onChange={event => set('taxRate', Number(event.target.value))} /></Field>
-      </div>
-      <div className="my-5 rounded-xl border"><div className="flex items-center justify-between border-b bg-muted/35 px-4 py-3"><p className="text-sm font-semibold">Invoice items ({order.items.length})</p><Button type="button" variant="soft" className="min-h-8 px-2.5 text-xs" onClick={addItem}><Plus size={14} /> Add item</Button></div><div className="divide-y">{order.items.map((item, index) => { const isExpanded = expandedItem === index; const product = store.recipes.find(p => p.id === item.productId); const itemTotal = item.quantity * item.unitPrice; return <div key={`${item.productId}-${index}`} className={cx('transition-colors', isExpanded && 'bg-muted/20')}><div className="flex items-center gap-3 px-4 py-3 cursor-pointer" onClick={() => setExpandedItem(isExpanded ? null : index)}><div className="flex-1 min-w-0"><p className="text-sm font-semibold truncate">{product?.name || 'Select product'}</p><p className="text-[10px] text-muted-foreground">{item.quantity} × {money(item.unitPrice)} = {money(itemTotal)}</p></div><div className="flex items-center gap-2"><span className="mono text-sm font-semibold">{money(itemTotal)}</span><ChevronRight size={14} className={cx('text-muted-foreground transition-transform', isExpanded && 'rotate-90')} /></div></div>{isExpanded && <div className="px-4 pb-4 pt-1 grid items-end gap-3 sm:grid-cols-[1fr_100px_120px_30px]"><Field label="Description"><Select value={item.productId} onChange={event => { const product = store.recipes.find(product => product.id === event.target.value); updateItem(index, { productId: event.target.value, unitPrice: product?.retailPriceDozen || 0 }); }}>{store.recipes.map(product => <option key={product.id} value={product.id}>{product.name}</option>)}</Select></Field><Field label="Qty"><Input type="number" min="0.01" step=".01" value={item.quantity} onChange={event => updateItem(index, { quantity: Number(event.target.value) })} /></Field><Field label="Unit price"><Input type="number" min="0" step=".01" value={item.unitPrice} onChange={event => updateItem(index, { unitPrice: Number(event.target.value) })} /></Field><IconButton label="Remove item" type="button" onClick={() => { setOrder(current => ({ ...current, items: current.items.filter((_, itemIndex) => itemIndex !== index) })); setExpandedItem(null); }}><Trash2 size={15} /></IconButton></div>}</div>; })}</div></div>
-      <div className="grid gap-4 sm:grid-cols-3"><Field label="Discount"><Input type="number" min="0" step=".01" value={order.discount} onChange={event => set('discount', Number(event.target.value))} /></Field><Field label="Delivery fee"><Input type="number" min="0" step=".01" value={order.deliveryFee} onChange={event => set('deliveryFee', Number(event.target.value))} /></Field><Field label="Amount paid"><Input type="number" min="0" step=".01" value={order.amountPaid} onChange={event => set('amountPaid', Number(event.target.value))} /></Field></div>
-      <Field label="Notes"><textarea className="mt-4 min-h-16 w-full rounded-lg border bg-background p-3 text-sm outline-none" value={order.notes} onChange={event => set('notes', event.target.value)} /></Field>
-      <div className="mt-5 flex items-center justify-between border-t pt-4"><div><span className="text-xs text-muted-foreground">Invoice total</span><p className="mono text-xl font-semibold">{money(total)}</p></div><div className="flex gap-2"><Button type="button" variant="ghost" onClick={onClose}>Cancel</Button><Button type="submit">Save invoice</Button></div></div>
-    </form>
-  </Modal>;
+  const total = calculateOrderTotal(o.items, o.discount, o.deliveryFee, o.taxRate || 0);
+  const set = (k: keyof Order, v: string | number) => setO(x => ({ ...x, [k]: v }));
+  const snapshot = (item: Order['items'][number]) => { const r = store.recipes.find(x => x.id === item.productId); return r ? roundCurrency(costPerDozen(r, store.ingredients)) : item.costSnapshot; };
+  const updateItem = (idx: number, key: string, val: string | number) => setO(x => ({ ...x, items: x.items.map((row, i) => i === idx ? { ...row, [key]: val } : row) }));
+  const handlePasteParse = () => { if (!pasteText.trim()) return; const parsed = parseOrderText(pasteText, store.recipes); setO(current => ({ ...current, customerName: parsed.customerName || current.customerName, items: parsed.items.map(i => ({ ...i, costSnapshot: (() => { const r = store.recipes.find(x => x.id === i.productId); return r ? roundCurrency(costPerDozen(r, store.ingredients)) : 0; })() })), dueDate: parsed.dueDate || current.dueDate, notes: parsed.notes || current.notes })); setShowPaste(false); setPasteText(''); };
+  const addItem = () => { setO(x => ({ ...x, items: [...x.items, { productId: store.recipes[0]?.id || '', quantity: 1, unitPrice: store.recipes[0]?.retailPriceDozen || 0, costSnapshot: 0 }] })); setExpandedItem(o.items.length); };
+  const plan = preBakePlan(o, store.ingredients, store.recipes, store.reservations);
+  const hold = reservationForOrder(store.reservations, value.id);
+  return (
+    <Modal title={value.customerName ? `Edit ${value.invoiceNumber}` : 'New customer order'} subtitle="Save a price snapshot so this order stays historically accurate." onClose={onClose} wide>
+      <form onSubmit={e => { e.preventDefault(); onSave({ ...o, items: o.items.map(item => ({ ...item, costSnapshot: snapshot(item) })) }); }}>
+        {showPaste && (
+          <div className="mb-5 rounded-xl border border-dashed border-primary/40 bg-primary/5 p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/15 text-primary"><Upload size={14} /></span>
+                <p className="text-sm font-semibold">Paste a WhatsApp order</p>
+              </div>
+              <button type="button" onClick={() => setShowPaste(false)} className="text-xs text-muted-foreground hover:text-foreground">Skip</button>
+            </div>
+            <p className="mb-3 text-xs text-muted-foreground">Paste the message — auto-detects customer, products, quantities, and delivery date.</p>
+            <textarea value={pasteText} onChange={e => setPasteText(e.target.value)} placeholder={'e.g.\nHi, I need 5 boxes Oat Raisin Cookies and 2 boxes Jam Tarts for Friday'} className="min-h-24 w-full rounded-lg border bg-background p-3 text-sm outline-none placeholder:text-muted-foreground/50 focus:ring-2 focus:ring-primary/20" />
+            <Button type="button" className="mt-3 w-full" onClick={handlePasteParse}>Parse and fill form</Button>
+          </div>
+        )}
+        {!showPaste && (
+          <div className="mb-4 flex items-center gap-2">
+            <button type="button" onClick={() => setShowPaste(true)} className="flex items-center gap-1.5 rounded-lg border border-dashed border-muted-foreground/30 px-3 py-1.5 text-xs text-muted-foreground hover:border-primary hover:text-primary transition-colors">
+              <Upload size={12} /> Paste WhatsApp order
+            </button>
+          </div>
+        )}
+        <div className="grid gap-4 sm:grid-cols-3">
+          {store.clients.length > 0 && !o.customerName && (
+            <div className="sm:col-span-3">
+              <Field label="Choose a saved client (optional)">
+                <Select value="" onChange={e => { const c = store.clients.find(x => x.id === e.target.value); if (c) setO(current => ({ ...current, customerName: c.name, customerAddress: c.address, customerCity: c.city, phone: c.phone })); }}>
+                  <option value="">— Type manually or pick a client —</option>
+                  {store.clients.sort((a, b) => a.name.localeCompare(b.name)).map(c => <option key={c.id} value={c.id}>{c.name}{c.city ? ` (${c.city})` : ''}</option>)}
+                </Select>
+              </Field>
+            </div>
+          )}
+          <Field label="Customer name"><Input required value={o.customerName} onChange={e => set('customerName', e.target.value)} /></Field>
+          <Field label="Phone"><Input value={o.phone} onChange={e => set('phone', e.target.value)} /></Field>
+          <Field label="Order number"><Input value={o.orderNumber} onChange={e => set('orderNumber', e.target.value)} /></Field>
+          <Field label="Order date"><Input type="date" value={o.orderDate} onChange={e => set('orderDate', e.target.value)} /></Field>
+          <Field label="Due date"><Input type="date" value={o.dueDate} onChange={e => set('dueDate', e.target.value)} /></Field>
+          <Field label="Payment status"><Select value={o.paymentStatus} onChange={e => set('paymentStatus', e.target.value)}><option>Unpaid</option><option>Deposit Paid</option><option>Partially Paid</option><option>Paid</option></Select></Field>
+          <Field label="Payment method"><Select value={o.paymentMethod} onChange={e => set('paymentMethod', e.target.value)}><option>Cash</option><option>Check</option><option>Credit</option><option>Other</option><option>Mobile money</option><option>Bank transfer</option></Select></Field>
+          <Field label="Priority"><Select value={o.priority || 'Normal'} onChange={e => set('priority', e.target.value as 'Normal' | 'Rush' | 'Urgent')}><option>Normal</option><option>Rush</option><option>Urgent</option></Select></Field>
+        </div>
+        <div className="my-5 rounded-xl border">
+          <div className="flex items-center justify-between border-b bg-muted/35 px-4 py-3">
+            <p className="text-sm font-semibold">Items ({o.items.length})</p>
+            <Button type="button" variant="soft" className="min-h-8 px-2.5 text-xs" onClick={addItem}><Plus size={14} /> Add item</Button>
+          </div>
+          <div className="divide-y">
+            {o.items.map((item, idx) => {
+              const isExpanded = expandedItem === idx;
+              const product = store.recipes.find(p => p.id === item.productId);
+              const itemTotal = item.quantity * item.unitPrice;
+              return (
+                <div key={idx} className={cx('transition-colors', isExpanded && 'bg-muted/20')}>
+                  <div className="flex items-center gap-3 px-4 py-3 cursor-pointer" onClick={() => setExpandedItem(isExpanded ? null : idx)}>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold truncate">{product?.name || 'Select product'}</p>
+                      <p className="text-[10px] text-muted-foreground">{item.quantity} × {money(item.unitPrice)} = {money(itemTotal)}</p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button type="button" variant="ghost" className="h-7 w-7 p-0" onClick={(e) => { e.stopPropagation(); setO(x => ({ ...x, items: x.items.filter((_, i) => i !== idx) })); }}><Trash2 size={14} className="text-muted-foreground" /></Button>
+                      <ChevronDown size={16} className={cx('text-muted-foreground transition-transform', isExpanded && 'rotate-180')} />
+                    </div>
+                  </div>
+                  {isExpanded && (
+                    <div className="border-t bg-muted/20 p-4 space-y-3">
+                      <Field label="Product">
+                        <Select value={item.productId} onChange={e => updateItem(idx, 'productId', e.target.value)}>
+                          {store.recipes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </Select>
+                      </Field>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <Field label="Quantity"><Input type="number" min="1" value={item.quantity} onChange={e => updateItem(idx, 'quantity', Number(e.target.value))} /></Field>
+                        <Field label="Unit price"><Input type="number" min="0" step=".01" value={item.unitPrice} onChange={e => updateItem(idx, 'unitPrice', Number(e.target.value))} /></Field>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <PreBakeCheck plan={plan} hold={hold} isNew={!value.customerName} />
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Field label="Discount"><Input type="number" min="0" step=".01" value={o.discount} onChange={e => set('discount', Number(e.target.value))} /></Field>
+          <Field label="Delivery fee"><Input type="number" min="0" step=".01" value={o.deliveryFee} onChange={e => set('deliveryFee', Number(e.target.value))} /></Field>
+          <Field label="Amount paid"><Input type="number" min="0" step=".01" value={o.amountPaid} onChange={e => set('amountPaid', Number(e.target.value))} /></Field>
+        </div>
+        <div className="mt-4 rounded-lg border border-dashed p-3">
+          <label className="flex cursor-pointer items-center gap-2.5">
+            <input type="checkbox" checked={!!o.excludeFromRevenue} onChange={e => setO(x => ({ ...x, excludeFromRevenue: e.target.checked }))} className="h-4 w-4 rounded border-input" />
+            <span className="text-sm font-medium">Don't count this order in revenue</span>
+          </label>
+          <p className="mt-1 pl-6 text-[10px] text-muted-foreground">Revenue, reports and analytics will ignore this receipt. Stock, reservations and production are never affected.</p>
+        </div>
+        <div className="flex justify-end gap-2 mt-4">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button type="submit">Save invoice</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+function InvoicePreview({ order, store, onClose, onEdit, onBakingReport, onKitchenOrder, onToggleExclude }: { order: Order; store: Store; onClose: () => void; onEdit?: (o: Order) => void; onBakingReport?: (o: Order) => void; onKitchenOrder?: (o: Order) => void; onToggleExclude?: (o: Order) => void }) {
+  return createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Print preview</p><h2 className="display text-2xl font-semibold">{order.invoiceNumber}</h2>{order.excludeFromRevenue && <span className="mt-1 inline-block rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-semibold text-destructive">Excluded from revenue — stock unchanged</span>}</div><div className="flex flex-wrap gap-2"><Button variant="ghost" onClick={onClose}>Close preview</Button>{onEdit && <Button variant="soft" onClick={() => onEdit(order)}><Pencil size={16} /> Edit order</Button>}{onToggleExclude && <Button variant="soft" onClick={() => onToggleExclude(order)} title={order.excludeFromRevenue ? 'This receipt will count toward revenue again' : 'Disconnect this receipt from revenue, reports and analytics. Stock stays unchanged.'}><EyeOff size={16} /> {order.excludeFromRevenue ? 'Include in revenue' : 'Exclude from revenue'}</Button>}{onBakingReport && <Button variant="soft" onClick={() => onBakingReport(order)}><BookOpen size={16} /> Baking report</Button>}{onKitchenOrder && <Button variant="soft" onClick={() => onKitchenOrder(order)}><ClipboardList size={16} /> Kitchen order</Button>}<Button onClick={() => printWithTitle("Little Bliss Bakery - Invoice - " + order.invoiceNumber)}><FileText size={16} /> Print or save PDF</Button></div></div><InvoiceDocument order={order} recipes={store.recipes} settings={store.settings} /></div></div>, document.body);
 }
 
-function InvoicePreview({ order, store, onClose }: { order: Order; store: Store; onClose: () => void }) {
-  return createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Print preview</p><h2 className="display text-2xl font-semibold">{order.invoiceNumber}</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={onClose}>Close preview</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Invoice - " + order.invoiceNumber)}><FileText size={16} /> Print or save PDF</Button></div></div><InvoiceDocument order={order} recipes={store.recipes} settings={store.settings} /></div></div>, document.body);
+function ShoppingListModal({ store, onClose }: { store: Store; onClose: () => void }) {
+  const [mode, setMode] = useState<'blank' | 'low-stock' | 'all'>('blank');
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [boughtBy, setBoughtBy] = useState('');
+  
+  return createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Print preview</p><h2 className="display text-2xl font-semibold">Shopping List</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={onClose}>Close preview</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Shopping List")}><FileText size={16} /> Print or save PDF</Button></div></div><div className="no-print mb-4 flex items-center gap-4 p-4 bg-muted/50 rounded-lg"><span className="text-sm font-medium">Mode:</span><div className="flex gap-2"><button onClick={() => setMode('blank')} className={cx('px-3 py-1.5 rounded-lg text-xs font-semibold', mode === 'blank' ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted')}>Blank template</button><button onClick={() => setMode('low-stock')} className={cx('px-3 py-1.5 rounded-lg text-xs font-semibold', mode === 'low-stock' ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted')}>Low stock only</button><button onClick={() => setMode('all')} className={cx('px-3 py-1.5 rounded-lg text-xs font-semibold', mode === 'all' ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted')}>All ingredients</button></div></div><div className="no-print mb-4 grid gap-4 sm:grid-cols-2"><Field label="Date"><Input type="date" value={date} onChange={e => setDate(e.target.value)} /></Field><Field label="Bought by"><Input value={boughtBy} onChange={e => setBoughtBy(e.target.value)} placeholder="Name" /></Field></div><ShoppingListDocument ingredients={store.ingredients} settings={store.settings} mode={mode} date={date} boughtBy={boughtBy} /></div></div>, document.body);
+}
+
+function StockCheckSheetModal({ store, onClose }: { store: Store; onClose: () => void }) {
+  const [mode, setMode] = useState<'blank' | 'low-stock' | 'all'>('blank');
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [baker, setBaker] = useState('');
+  const [sheetNumber, setSheetNumber] = useState('');
+  const [checkedBy, setCheckedBy] = useState('');
+  
+  return createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Print preview</p><h2 className="display text-2xl font-semibold">Stock Check Sheet</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={onClose}>Close preview</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Stock Check Sheet")}><FileText size={16} /> Print or save PDF</Button></div></div><div className="no-print mb-4 flex items-center gap-4 p-4 bg-muted/50 rounded-lg"><span className="text-sm font-medium">Mode:</span><div className="flex gap-2"><button onClick={() => setMode('blank')} className={cx('px-3 py-1.5 rounded-lg text-xs font-semibold', mode === 'blank' ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted')}>Blank template</button><button onClick={() => setMode('low-stock')} className={cx('px-3 py-1.5 rounded-lg text-xs font-semibold', mode === 'low-stock' ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted')}>Low stock only</button><button onClick={() => setMode('all')} className={cx('px-3 py-1.5 rounded-lg text-xs font-semibold', mode === 'all' ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted')}>All ingredients</button></div></div><div className="no-print mb-4 grid gap-4 sm:grid-cols-2"><Field label="Date"><Input type="date" value={date} onChange={e => setDate(e.target.value)} /></Field><Field label="Baker"><Input value={baker} onChange={e => setBaker(e.target.value)} placeholder="Name" /></Field><Field label="Sheet No."><Input value={sheetNumber} onChange={e => setSheetNumber(e.target.value)} placeholder="#" /></Field><Field label="Checked by"><Input value={checkedBy} onChange={e => setCheckedBy(e.target.value)} placeholder="Name" /></Field></div><StockCheckSheetDocument ingredients={store.ingredients} recipes={store.recipes} settings={store.settings} mode={mode} date={date} baker={baker} sheetNumber={sheetNumber} checkedBy={checkedBy} /></div></div>, document.body);
 }
 
 function ExcelImportModal({ store, update, onClose }: { store: Store; update: (patch: Partial<Store>) => void; onClose: () => void }) {
@@ -617,9 +1295,9 @@ function ExcelImportModal({ store, update, onClose }: { store: Store; update: (p
 }
 
 function Expenses() {
-  const { store, update } = useStore(); const isMobile = useIsMobile(); const [edit, setEdit] = useState<Expense | null>(null); const [location] = useLocation();
+  const { store, update } = useStore(); const isMobile = useIsMobile(); const [edit, setEdit] = useState<Expense | null>(null); const [location] = useLocation(); const urlSearch = useSearch();
   const add = () => setEdit({ id: id('exp'), date: today(), category: 'Ingredients', description: '', amount: 0, supplier: '', relatedOrderId: '', notes: '' });
-  useEffect(() => { if (location.includes('?new=1')) add(); }, [location]);
+  useEffect(() => { if (new URLSearchParams(urlSearch).get('new') === '1') { add(); clearSearchParam('new'); } }, [location, urlSearch]);
   const remove = (expense: Expense) => { if (window.confirm(`Delete ${expense.description || 'this expense'}?`)) update({ expenses: store.expenses.filter(x => x.id !== expense.id), auditLog: [createAuditEntry('Expenses', 'deleted', expense.id, expense.description, `Deleted expense: ${expense.description} (${money(expense.amount)})`), ...store.auditLog], notifications: [createNotification('Expense deleted', `${expense.description} removed`, 'Expenses', expense.id), ...store.notifications] }); };
   const saveExpense = (e: Expense) => { const exists = store.expenses.some(x => x.id === e.id); update({ expenses: exists ? store.expenses.map(x => x.id === e.id ? e : x) : [e, ...store.expenses], auditLog: [createAuditEntry('Expenses', exists ? 'updated' : 'created', e.id, e.description, `${exists ? 'Updated' : 'Created'} expense: ${e.description} (${money(e.amount)})`), ...store.auditLog], notifications: [createNotification(`Expense ${exists ? 'updated' : 'created'}`, `${e.description} — ${money(e.amount)}`, 'Expenses', e.id), ...store.notifications] }); setEdit(null); };
   if (isMobile) { return <div><div className="mb-4 flex items-center justify-between"><h1 className="display text-xl font-semibold">Expenses</h1><Button onClick={add}><Plus size={16} /> Add</Button></div><div className="mb-3 flex items-center justify-center gap-4 text-[10px] text-muted-foreground"><span className="flex items-center gap-1"><ArrowUpRight size={10} /> Swipe right to edit</span><span className="flex items-center gap-1">Swipe left to delete <ArrowDownRight size={10} /></span></div><div className="space-y-2">{store.expenses.map(e => <SwipeableRow key={e.id} onEdit={() => setEdit(e)} onDelete={() => remove(e)}><Card className="p-4"><div className="flex items-center justify-between mb-1"><p className="text-sm font-semibold">{e.description}</p><p className="mono text-sm font-semibold">{money(e.amount)}</p></div><div className="flex items-center justify-between"><div className="flex items-center gap-2"><span className="rounded-full bg-muted px-2 py-0.5 text-[10px]">{e.category}</span><span className="text-[10px] text-muted-foreground">{shortDate(e.date)}</span></div></div></Card></SwipeableRow>)}{!store.expenses.length && <Empty icon={Wallet} title="No expenses" detail="Start recording expenses to track your outflow." action={<Button onClick={add}>Add expense</Button>} />}</div>{edit && <ExpenseModal value={edit} onClose={() => setEdit(null)} onSave={saveExpense} />}</div>; }
@@ -628,12 +1306,19 @@ function Expenses() {
 function ExpenseModal({ value, onClose, onSave }: { value: Expense; onClose: () => void; onSave: (v: Expense) => void }) { const [e, setE] = useState(value); const set = (k: keyof Expense, v: string | number) => setE(x => ({ ...x, [k]: v })); return <Modal title={value.description ? 'Edit expense' : 'New expense'} onClose={onClose}><form onSubmit={ev => { ev.preventDefault(); onSave(e); }} className="space-y-4"><div className="grid gap-4 sm:grid-cols-2"><Field label="Date"><Input type="date" value={e.date} onChange={x => set('date', x.target.value)} /></Field><Field label="Category"><Select value={e.category} onChange={x => set('category', x.target.value)}><option>Ingredients</option><option>Packaging</option><option>Utilities</option><option>Transport</option><option>Equipment</option><option>Other</option></Select></Field><Field label="Description"><Input required value={e.description} onChange={x => set('description', x.target.value)} /></Field><Field label="Amount"><Input required type="number" min="0" step=".01" value={e.amount} onChange={x => set('amount', Number(x.target.value))} /></Field><Field label="Supplier"><Input value={e.supplier} onChange={x => set('supplier', x.target.value)} /></Field></div><Field label="Notes"><textarea className="min-h-20 w-full rounded-lg border bg-background p-3 text-sm" value={e.notes} onChange={x => set('notes', x.target.value)} /></Field><div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={onClose}>Cancel</Button><Button type="submit">Save expense</Button></div></form></Modal>; }
 
 function Inventory() {
-  const { store, update } = useStore(); const isMobile = useIsMobile(); const [edit, setEdit] = useState<InventoryTransaction | null>(null); const [location] = useLocation();
+  const { store, update } = useStore(); const isMobile = useIsMobile(); const [edit, setEdit] = useState<InventoryTransaction | null>(null); const [location] = useLocation(); const urlSearch = useSearch();
   const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState<Record<string, boolean>>(() => { try { const saved = localStorage.getItem('inventory-expanded'); return saved ? JSON.parse(saved) : {}; } catch { return {}; } });
   const [pinned, setPinned] = useState<Record<string, boolean>>(() => { try { const saved = localStorage.getItem('inventory-pinned'); return saved ? JSON.parse(saved) : {}; } catch { return {}; } });
+  const [showShoppingList, setShowShoppingList] = useState(false);
+  const [showStockCheck, setShowStockCheck] = useState(false);
+  const reservedByIngredient = useMemo(() => reservedQuantityByIngredient(store.reservations), [store.reservations]);
+  const heldFor = (i: Ingredient) => reservedByIngredient[i.id] || 0;
+  const heldCount = reservedBatchCount(store.reservations);
+  const heldValue = roundCurrency(store.ingredients.reduce((s, i) => s + (unitCost(i) || 0) * heldFor(i), 0));
+  const freeValue = roundCurrency(store.ingredients.reduce((s, i) => s + (unitCost(i) || 0) * availableStock(i, reservedByIngredient), 0));
   const add = (type: string) => setEdit({ id: id('txn'), ingredientId: store.ingredients[0]?.id || '', type, quantity: 0, date: today(), note: '' });
-  useEffect(() => { if (location.includes('?new=1')) add('receive'); }, [location]);
+  useEffect(() => { if (new URLSearchParams(urlSearch).get('new') === '1') { add('receive'); clearSearchParam('new'); } }, [location, urlSearch]);
   const save = (t: InventoryTransaction) => { const ingredient = store.ingredients.find(i => i.id === t.ingredientId); if (!ingredient) return; const newStock = t.type === 'set' ? Math.max(0, t.quantity) : Math.max(0, ingredient.currentStock + (t.type === 'waste' || t.type === 'use' ? -1 : 1) * t.quantity); const minStock = t.minimumStock !== undefined ? t.minimumStock : ingredient.minimumStock; update({ ingredients: store.ingredients.map(i => i.id === t.ingredientId ? { ...i, currentStock: newStock, minimumStock: minStock } : i), transactions: [t, ...store.transactions], auditLog: [createAuditEntry('Inventory', t.type, t.ingredientId, ingredient.name, t.type === 'set' ? `Set ${ingredient.name} stock to ${t.quantity} ${ingredient.unit}` : `${t.type} ${t.quantity} ${ingredient.unit} of ${ingredient.name}`), ...store.auditLog], notifications: [createNotification(`Stock ${t.type}`, t.type === 'set' ? `${ingredient.name} set to ${t.quantity} ${ingredient.unit}` : `${t.quantity} ${ingredient.unit} of ${ingredient.name} ${t.type === 'waste' ? 'wasted' : 'received'}`, 'Inventory', t.ingredientId), ...store.notifications] }); setEdit(null); };
   const categories = [...new Set(store.ingredients.map(i => i.category))].sort();
   const filteredByCategory = categories.map(cat => {
@@ -648,8 +1333,152 @@ function Inventory() {
     try { localStorage.setItem('inventory-expanded', JSON.stringify(next)); } catch {} return next;
   });
   const togglePin = (cat: string) => setPinned(prev => { const next = { ...prev, [cat]: !prev[cat] }; try { localStorage.setItem('inventory-pinned', JSON.stringify(next)); } catch {} return next; });
-  if (isMobile) { return <div><div className="mb-4 flex items-center justify-between"><h1 className="display text-xl font-semibold">Inventory</h1><div className="flex gap-2"><Button variant="soft" onClick={() => add('waste')} className="min-h-8 px-2.5 text-xs"><ArrowDownRight size={14} /> Waste</Button><Button onClick={() => add('receive')} className="min-h-8 px-2.5 text-xs"><Plus size={14} /> Receive</Button></div></div><div className="grid grid-cols-2 gap-3 mb-4">            <Card className="p-3"><p className="text-[10px] text-muted-foreground">Stock value</p><p className="mono mt-1 text-lg font-semibold">{money(roundCurrency(store.ingredients.reduce((s, i) => s + (unitCost(i) || 0) * i.currentStock, 0)))}</p></Card><Card className="p-3"><p className="text-[10px] text-muted-foreground">Needs attention</p><p className="mono mt-1 text-lg font-semibold text-primary">{store.ingredients.filter(i => i.minimumStock > 0 && i.currentStock <= i.minimumStock).length}</p></Card></div><div className="relative mb-4"><Search className="absolute left-3 top-2.5 text-muted-foreground" size={16} /><Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search ingredients..." className="pl-9" /></div><div className="space-y-3">{filteredByCategory.map(({ category, items }) => { const isOpen = expanded[category] === true; const catLow = items.filter(i => i.minimumStock > 0 && i.currentStock <= i.minimumStock).length; const catValue = roundCurrency(items.reduce((s, i) => s + (unitCost(i) || 0) * i.currentStock, 0)); return <Card key={category} className="overflow-hidden"><button onClick={() => toggleCategory(category)} className="flex w-full items-center gap-3 px-4 py-3 text-left"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground"><Box size={16} /></span><div className="flex-1 min-w-0"><p className="text-sm font-semibold">{category}</p><p className="text-[10px] text-muted-foreground">{items.length} items · {money(catValue)}</p></div>{catLow > 0 && <span className="mr-2 rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-semibold text-destructive">{catLow} low</span>}<button type="button" onClick={e => { e.stopPropagation(); togglePin(category); }} className="p-1 rounded hover:bg-muted/50"><Pin size={14} className={cx(pinned[category] ? 'text-primary fill-primary/20' : 'text-muted-foreground')} /></button><ChevronRight size={16} className={cx('text-muted-foreground transition-transform', isOpen && 'rotate-90')} /></button>{isOpen && <div className="divide-y border-t">{items.map(i => { const low = i.minimumStock > 0 && i.currentStock <= i.minimumStock; const uc = unitCost(i); return <div key={i.id} className="flex items-center gap-3 px-4 py-3" onClick={() => setEdit({ id: id('txn'), ingredientId: i.id, type: 'set', quantity: i.currentStock, date: today(), note: '' })}><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><p className="text-sm font-medium">{i.name}</p>{low && <span className="h-1.5 w-1.5 rounded-full bg-destructive" />}</div><p className="text-[10px] text-muted-foreground">{i.supplier || 'No supplier'}{uc ? ` · ${money(uc)}/${i.unit}` : ''}</p></div><div className="text-right"><p className="mono text-sm">{i.currentStock.toLocaleString()} {i.unit}</p>{low && <p className="text-[10px] text-destructive">min {i.minimumStock}</p>}</div></div>; })}</div>}</Card>; })}{!filteredByCategory.length && <Empty icon={Box} title="No ingredients found" detail={search ? `No results for "${search}"` : "Add ingredients to start tracking inventory."} />}</div>{edit && <InventoryModal value={edit} ingredients={store.ingredients} onClose={() => setEdit(null)} onSave={save} />}</div>; }
-  return <div><PageHeader eyebrow="Pantry floor" title="Inventory" description="Know what is on hand before the first tray goes in." action={<div className="flex gap-2"><Button variant="soft" onClick={() => add('waste')}><ArrowDownRight size={16} /> Record waste</Button><Button onClick={() => add('receive')}><Plus size={16} /> Receive stock</Button></div>} /><div className="mb-4 grid gap-3 sm:grid-cols-3">        <Card className="p-4"><p className="text-xs text-muted-foreground">Stock value</p><p className="mono mt-2 text-2xl font-semibold">{money(roundCurrency(store.ingredients.reduce((s, i) => s + (unitCost(i) || 0) * i.currentStock, 0)))}</p></Card><Card className="p-4"><p className="text-xs text-muted-foreground">Tracked ingredients</p><p className="mono mt-2 text-2xl font-semibold">{store.ingredients.length}</p></Card><Card className="p-4"><p className="text-xs text-muted-foreground">Needs attention</p><p className="mono mt-2 text-2xl font-semibold text-primary">{store.ingredients.filter(i => i.minimumStock > 0 && i.currentStock <= i.minimumStock).length}</p></Card></div><div className="mb-5 flex items-center gap-3"><div className="relative max-w-sm flex-1"><Search className="absolute left-3 top-3 text-muted-foreground" size={16} /><Input data-testid="input-search-inventory" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search ingredients or categories..." className="pl-9" /></div>{search && <Button variant="ghost" onClick={() => setSearch('')} className="text-xs"><X size={14} /> Clear</Button>}</div><div className="space-y-4">{filteredByCategory.map(({ category, items }) => { const isOpen = expanded[category] === true; const catLow = items.filter(i => i.minimumStock > 0 && i.currentStock <= i.minimumStock).length; const catValue = roundCurrency(items.reduce((s, i) => s + (unitCost(i) || 0) * i.currentStock, 0)); const uc = (i: Ingredient) => unitCost(i); return <Card key={category} className="overflow-hidden"><button onClick={() => toggleCategory(category)} className="flex w-full items-center gap-4 px-5 py-4 text-left hover:bg-muted/30 transition-colors"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-secondary text-secondary-foreground"><Box size={18} /></span><div className="flex-1 min-w-0"><div className="flex items-center gap-2"><h3 className="font-semibold">{category}</h3>{catLow > 0 && <span className="rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-semibold text-destructive">{catLow} low stock</span>}</div><p className="text-xs text-muted-foreground">{items.length} ingredient{items.length !== 1 ? 's' : ''} · {money(catValue)} total value</p></div><button type="button" onClick={e => { e.stopPropagation(); togglePin(category); }} className="p-1.5 rounded-lg hover:bg-muted/50"><Pin size={16} className={cx(pinned[category] ? 'text-primary fill-primary/20' : 'text-muted-foreground')} /></button><ChevronRight size={18} className={cx('text-muted-foreground transition-transform duration-200', isOpen && 'rotate-90')} /></button>{isOpen && <div className="border-t"><div className="bg-muted/30 px-5 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground grid grid-cols-[1fr_100px_100px_100px_120px_80px_50px] gap-2"><span>Ingredient</span><span>On hand</span><span>Minimum</span><span>Unit cost</span><span>Stock value</span><span>Status</span><span /></div><div className="divide-y">{items.map(i => { const low = i.minimumStock > 0 && i.currentStock <= i.minimumStock; const ucost = uc(i); return <div key={i.id} className="grid grid-cols-[1fr_100px_100px_100px_120px_80px_50px] gap-2 items-center px-5 py-3.5 hover:bg-muted/20 cursor-pointer transition-colors" onClick={() => setEdit({ id: id('txn'), ingredientId: i.id, type: 'set', quantity: i.currentStock, date: today(), note: '' })}><div className="min-w-0"><p className="font-medium text-sm truncate">{i.name}</p><p className="text-[10px] text-muted-foreground truncate">{i.supplier || 'No supplier'}</p></div><span className="mono text-sm">{i.currentStock.toLocaleString()} {i.unit}</span><span className={cx('mono text-sm', !i.minimumStock && 'text-muted-foreground')}>{i.minimumStock || '—'}</span><span className={cx('mono text-sm', !ucost && 'text-muted-foreground')}>{ucost ? money(ucost) : '—'}</span><span className="mono text-sm">{ucost ? money(ucost * i.currentStock) : '—'}</span><span>{low ? <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-semibold text-destructive"><span className="h-1 w-1 rounded-full bg-destructive" /> Low</span> : <span className="inline-flex items-center gap-1 rounded-full bg-secondary/50 px-2 py-0.5 text-[10px] font-semibold text-secondary-foreground">OK</span>}</span><span /></div>; })}</div></div>}</Card>; })}{!filteredByCategory.length && <Card className="flex min-h-[200px] items-center justify-center"><Empty icon={Box} title="No ingredients found" detail={search ? `No results for "${search}"` : "Add ingredients to start tracking inventory."} /></Card>}</div>{edit && <InventoryModal value={edit} ingredients={store.ingredients} onClose={() => setEdit(null)} onSave={save} />}</div>;
+  if (isMobile) {
+    return <div>
+      <div className="mb-4 flex items-center justify-between">
+        <h1 className="display text-xl font-semibold">Inventory</h1>
+        <div className="flex gap-2">
+          <Button variant="soft" onClick={() => add('waste')} className="min-h-8 px-2.5 text-xs"><ArrowDownRight size={14} /> Waste</Button>
+          <Button onClick={() => add('receive')} className="min-h-8 px-2.5 text-xs"><Plus size={14} /> Receive</Button>
+          <Button variant="ghost" onClick={() => setShowShoppingList(true)} className="min-h-8 px-2.5 text-xs"><FileText size={14} /></Button>
+          <Button variant="ghost" onClick={() => setShowStockCheck(true)} className="min-h-8 px-2.5 text-xs"><ClipboardList size={14} /></Button>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3 mb-4">
+        <Card className="p-3"><p className="text-[10px] text-muted-foreground">Stock value</p><p className="mono mt-1 text-lg font-semibold">{money(roundCurrency(store.ingredients.reduce((s, i) => s + (unitCost(i) || 0) * i.currentStock, 0)))}</p></Card>
+        <Card className="p-3"><p className="text-[10px] text-muted-foreground">Needs attention</p><p className="mono mt-1 text-lg font-semibold text-primary">{store.ingredients.filter(i => i.minimumStock > 0 && i.currentStock <= i.minimumStock).length}</p></Card>
+      </div>
+      <div className="relative mb-4">
+        <Search className="absolute left-3 top-2.5 text-muted-foreground" size={16} />
+        <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search ingredients..." className="pl-9" />
+      </div>
+      <div className="space-y-3">
+        {filteredByCategory.map(({ category, items }) => {
+          const isOpen = expanded[category] === true;
+          const catLow = items.filter(i => i.minimumStock > 0 && i.currentStock <= i.minimumStock).length;
+          const catValue = roundCurrency(items.reduce((s, i) => s + (unitCost(i) || 0) * i.currentStock, 0));
+          return <Card key={category} className="overflow-hidden">
+            <button onClick={() => toggleCategory(category)} className="flex w-full items-center gap-3 px-4 py-3 text-left">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground"><Box size={16} /></span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold">{category}</p>
+                <p className="text-[10px] text-muted-foreground">{items.length} items · {money(catValue)}</p>
+              </div>
+              {catLow > 0 && <span className="mr-2 rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-semibold text-destructive">{catLow} low</span>}
+              <button type="button" onClick={e => { e.stopPropagation(); togglePin(category); }} className="p-1 rounded hover:bg-muted/50"><Pin size={14} className={cx(pinned[category] ? 'text-primary fill-primary/20' : 'text-muted-foreground')} /></button>
+              <ChevronRight size={16} className={cx('text-muted-foreground transition-transform', isOpen && 'rotate-90')} />
+            </button>
+            {isOpen && <div className="divide-y border-t">
+              {items.map(i => {
+                const low = i.minimumStock > 0 && i.currentStock <= i.minimumStock;
+                const uc = unitCost(i);
+                const held = heldFor(i);
+                return <div key={i.id} className="flex items-center gap-3 px-4 py-3" onClick={() => setEdit({ id: id('txn'), ingredientId: i.id, type: 'set', quantity: i.currentStock, date: today(), note: '' })}>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium">{i.name}</p>
+                      {low && <span className="h-1.5 w-1.5 rounded-full bg-destructive" />}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">{i.supplier || 'No supplier'}{uc ? ` · ${money(uc)}/${i.unit}` : ''}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="mono text-sm">{i.currentStock.toLocaleString()} {i.unit}</p>
+                    {low && <p className="text-[10px] text-destructive">min {i.minimumStock}</p>}
+                    {held > 0 && <p className="text-[10px] text-emerald-700">{availableStock(i, reservedByIngredient).toLocaleString()} free</p>}
+                  </div>
+                </div>;
+              })}
+            </div>}
+          </Card>;
+        })}
+      </div>
+      {!filteredByCategory.length && <Empty icon={Box} title="No ingredients found" detail={search ? `No results for "${search}"` : "Add ingredients to start tracking inventory."} />}
+      {edit && <InventoryModal value={edit} ingredients={store.ingredients} onClose={() => setEdit(null)} onSave={save} />}
+      {showShoppingList && <ShoppingListModal store={store} onClose={() => setShowShoppingList(false)} />}
+      {showStockCheck && <StockCheckSheetModal store={store} onClose={() => setShowStockCheck(false)} />}
+    </div>;
+  }
+  return <div>
+    <PageHeader eyebrow="Pantry floor" title="Inventory" description="Know what is on hand before the first tray goes in." action={
+      <div className="flex gap-2">
+        <Button variant="soft" onClick={() => add('waste')}><ArrowDownRight size={16} /> Record waste</Button>
+        <Button onClick={() => add('receive')}><Plus size={16} /> Receive stock</Button>
+        <Button variant="ghost" onClick={() => setShowShoppingList(true)}><FileText size={16} /> Shopping List</Button>
+        <Button variant="ghost" onClick={() => setShowStockCheck(true)}><ClipboardList size={16} /> Stock Check</Button>
+      </div>
+    } />
+    <div className="mb-4 grid gap-3 sm:grid-cols-3">
+      <Card className="p-4"><p className="text-xs text-muted-foreground">Stock value</p><p className="mono mt-2 text-2xl font-semibold">{money(roundCurrency(store.ingredients.reduce((s, i) => s + (unitCost(i) || 0) * i.currentStock, 0)))}</p></Card>
+      <Card className="p-4"><p className="text-xs text-muted-foreground">Tracked ingredients</p><p className="mono mt-2 text-2xl font-semibold">{store.ingredients.length}</p></Card>
+      <Card className="p-4"><p className="text-xs text-muted-foreground">Needs attention</p><p className="mono mt-2 text-2xl font-semibold text-primary">{store.ingredients.filter(i => i.minimumStock > 0 && i.currentStock <= i.minimumStock).length}</p></Card>
+    </div>
+    <Card className="mb-4 p-4">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+        <div className="flex items-center gap-2">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-100 text-blue-900"><Lock size={15} /></span>
+          <div><p className="text-[10px] text-muted-foreground">Held for unbaked batches</p><p className="mono text-sm font-semibold">{heldCount} batch{heldCount !== 1 ? 'es' : ''} · {money(heldValue)}</p></div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-100 text-emerald-900"><Check size={15} /></span>
+          <div><p className="text-[10px] text-muted-foreground">Free to promise</p><p className="mono text-sm font-semibold">{money(freeValue)}</p></div>
+        </div>
+        <p className="flex-1 text-[10px] leading-relaxed text-muted-foreground">Ingredients stay on hand until you mark a batch as baked — until then they are counted as held so the same flour cannot be promised twice.</p>
+      </div>
+    </Card>
+    <div className="mb-5 flex items-center gap-3">
+      <div className="relative max-w-sm flex-1">
+        <Search className="absolute left-3 top-3 text-muted-foreground" size={16} />
+        <Input data-testid="input-search-inventory" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search ingredients or categories..." className="pl-9" />
+      </div>
+      {search && <Button variant="ghost" onClick={() => setSearch('')} className="text-xs"><X size={14} /> Clear</Button>}
+    </div>
+    <div className="space-y-4">
+      {filteredByCategory.map(({ category, items }) => {
+        const isOpen = expanded[category] === true;
+        const catLow = items.filter(i => i.minimumStock > 0 && i.currentStock <= i.minimumStock).length;
+        const catValue = roundCurrency(items.reduce((s, i) => s + (unitCost(i) || 0) * i.currentStock, 0));
+        const uc = (i: Ingredient) => unitCost(i);
+        return <Card key={category} className="overflow-hidden">
+          <button onClick={() => toggleCategory(category)} className="flex w-full items-center gap-3 px-4 py-3 text-left">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground"><Box size={18} /></span>
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold">{category}</p>
+              <p className="text-xs text-muted-foreground">{items.length} items · {money(catValue)}</p>
+            </div>
+            {catLow > 0 && <span className="mr-2 rounded-full bg-destructive/15 px-2.5 py-1 text-xs font-semibold text-destructive">{catLow} low</span>}
+            <button type="button" onClick={e => { e.stopPropagation(); togglePin(category); }} className="p-1.5 rounded hover:bg-muted/50"><Pin size={16} className={cx(pinned[category] ? 'text-primary fill-primary/20' : 'text-muted-foreground')} /></button>
+            <ChevronRight size={18} className={cx('text-muted-foreground transition-transform', isOpen && 'rotate-90')} />
+          </button>
+          {isOpen && <div className="divide-y border-t">
+            {items.map(i => {
+              const low = i.minimumStock > 0 && i.currentStock <= i.minimumStock;
+              const u = uc(i);
+              const held = heldFor(i);
+              return <div key={i.id} className="flex items-center gap-4 px-5 py-4 hover:bg-muted/25 cursor-pointer" onClick={() => setEdit({ id: id('txn'), ingredientId: i.id, type: 'set', quantity: i.currentStock, date: today(), note: '' })}>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium">{i.name}</p>
+                    {low && <span className="h-2 w-2 rounded-full bg-destructive" />}
+                  </div>
+                  <p className="text-xs text-muted-foreground">{i.supplier || 'No supplier'}{u ? ` · ${money(u)}/${i.unit}` : ''}</p>
+                </div>
+                {held > 0 && <div className="hidden text-right sm:block"><p className="text-[10px] text-blue-900">held for baking</p><p className="mono text-xs font-semibold text-blue-900">{held.toLocaleString()} {i.unit}</p></div>}
+                <div className="text-right">
+                  <p className="mono text-sm font-semibold">{i.currentStock.toLocaleString()} {i.unit}</p>
+                  {low && <p className="text-xs text-destructive">min {i.minimumStock}</p>}
+                  {held > 0 && <p className="text-[10px] text-emerald-700">{availableStock(i, reservedByIngredient).toLocaleString()} free</p>}
+                </div>
+              </div>;
+            })}
+          </div>}
+        </Card>;
+      })}
+    </div>
+    {!filteredByCategory.length && <Empty icon={Box} title="No ingredients found" detail={search ? `No results for "${search}"` : "Add ingredients to start tracking inventory."} />}
+    {edit && <InventoryModal value={edit} ingredients={store.ingredients} onClose={() => setEdit(null)} onSave={save} />}
+    {showShoppingList && <ShoppingListModal store={store} onClose={() => setShowShoppingList(false)} />}
+    {showStockCheck && <StockCheckSheetModal store={store} onClose={() => setShowStockCheck(false)} />}
+  </div>;
 }
 function InventoryModal({ value, ingredients, onClose, onSave }: { value: InventoryTransaction; ingredients: Ingredient[]; onClose: () => void; onSave: (v: InventoryTransaction) => void }) {
   const [t, setT] = useState(value);
@@ -697,17 +1526,16 @@ function InventoryModal({ value, ingredients, onClose, onSave }: { value: Invent
 }
 
 function Reports() {
-  const { store } = useStore(); const isMobile = useIsMobile(); const [period, setPeriod] = useState('Monthly');
-  const now = new Date(); const cm = now.getMonth(); const cy = now.getFullYear();
-  const isCurrentMonth = (dateStr: string) => { const d = new Date(dateStr); return d.getMonth() === cm && d.getFullYear() === cy; };
-  const monthOrders = store.orders.filter(o => isCurrentMonth(o.orderDate) && !(o.archived && o.paymentStatus !== 'Paid'));
-  const monthExpenses = store.expenses.filter(e => isCurrentMonth(e.date));
-  const revenue = monthOrders.reduce((s, o) => s + o.items.reduce((a, i) => a + i.quantity * i.unitPrice, 0) - o.discount, 0);
-  const costs = monthOrders.reduce((s, o) => s + calculateOrderCost(o.items), 0);
-  const expenses = monthExpenses.reduce((s, e) => s + e.amount, 0);
+  const { store } = useStore(); const isMobile = useIsMobile(); const [period, setPeriod] = useState<RevenuePeriod>('month');
+  const periodLabel = revenuePeriodLabel(period);
+  const revOrders = revenueOrders(store.orders, period);
+  const revExpenses = store.expenses.filter(e => inRevenuePeriod(e.date, period));
+  const revenue = revOrders.reduce((s, o) => s + o.items.reduce((a, i) => a + i.quantity * i.unitPrice, 0) - o.discount, 0);
+  const costs = revOrders.reduce((s, o) => s + calculateOrderCost(o.items), 0);
+  const expenses = revExpenses.reduce((s, e) => s + e.amount, 0);
   const download = (filename: string, content: string) => { const blob = new Blob([content], { type: 'text/csv' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = filename; a.click(); URL.revokeObjectURL(url); };
-  if (isMobile) { return <div><div className="mb-4 flex items-center justify-between"><h1 className="display text-xl font-semibold">Reports</h1><Button variant="soft" onClick={() => download('little-bliss-orders.csv', `order,customer,total,status\n${store.orders.map(o => `${o.orderNumber},${o.customerName},${calculateOrderTotal(o.items, o.discount, o.deliveryFee, o.taxRate || 0)},${o.paymentStatus}`).join('\n')}`)}><Download size={14} /> CSV</Button></div><div className="grid grid-cols-2 gap-3 mb-4"><Card className="p-4"><p className="text-[10px] text-muted-foreground">Revenue</p><p className="mono mt-1 text-lg font-semibold">{money(revenue)}</p></Card><Card className="p-4"><p className="text-[10px] text-muted-foreground">Costs</p><p className="mono mt-1 text-lg font-semibold">{money(costs)}</p></Card><Card className="p-4"><p className="text-[10px] text-muted-foreground">Expenses</p><p className="mono mt-1 text-lg font-semibold">{money(expenses)}</p></Card><Card className="p-4"><p className="text-[10px] text-muted-foreground">Profit</p><p className={cx('mono mt-1 text-lg font-semibold', revenue - costs - expenses < 0 && 'text-destructive')}>{money(revenue - costs - expenses)}</p></Card></div><Card className="p-4"><h2 className="text-sm font-semibold mb-3">Top products</h2><div className="space-y-2.5">{store.recipes.map(p => { const units = monthOrders.reduce((s, o) => s + o.items.filter(i => i.productId === p.id).reduce((a, i) => a + i.quantity, 0), 0); const val = monthOrders.reduce((s, o) => s + o.items.filter(i => i.productId === p.id).reduce((a, i) => a + i.quantity * i.unitPrice, 0), 0); return <div key={p.id} className="flex items-center justify-between"><span className="text-sm">{p.name}</span><div className="text-right"><p className="mono text-xs font-semibold">{units} units</p><p className="text-[10px] text-muted-foreground">{money(val)}</p></div></div>; })}</div></Card></div>; }
-  return <div><PageHeader eyebrow="Numbers with context" title="Reports" description="A weekly rhythm for seeing what is working and what to change." action={<Button variant="soft" onClick={() => download('little-bliss-orders.csv', `order,customer,total,status\n${store.orders.map(o => `${o.orderNumber},${o.customerName},${calculateOrderTotal(o.items, o.discount, o.deliveryFee, o.taxRate || 0)},${o.paymentStatus}`).join('\n')}`)}><Download size={16} /> Export CSV</Button>} /><div className="mb-5 flex items-center gap-1 rounded-lg border bg-card p-1 w-fit">{['Daily', 'Weekly', 'Monthly'].map(x => <button key={x} data-testid={`button-period-${x.toLowerCase()}`} onClick={() => setPeriod(x)} className={cx('rounded-md px-4 py-2 text-xs font-semibold', period === x ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')}>{x}</button>)}</div><div className="grid gap-5 lg:grid-cols-[1.15fr_.85fr]"><Card className="p-5"><div className="flex items-start justify-between"><div><p className="text-xs text-muted-foreground">{period} revenue</p><p className="mono mt-2 text-3xl font-semibold">{money(revenue)}</p></div><span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-semibold text-secondary-foreground">{monthOrders.length} order{monthOrders.length !== 1 ? 's' : ''}</span></div></Card><Card className="p-5"><div className="mb-5 flex items-center justify-between"><div><h2 className="font-semibold">Profitability snapshot</h2><p className="text-xs text-muted-foreground">Estimated margin per product</p></div></div>                <div className="space-y-3">{store.recipes.map(p => { const c = costOfRecipe(p, store.ingredients); const profit = roundCurrency(p.retailPriceDozen - c); return <div key={p.id} className="flex items-center justify-between"><div className="flex items-center gap-3"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-secondary text-[10px] font-bold text-secondary-foreground">{store.recipes.indexOf(p) + 1}</span><div><p className="text-sm font-semibold">{p.name}</p><p className="text-[10px] text-muted-foreground">cost {c ? money(c) : '—'}</p></div></div><div className="text-right"><p className="mono text-sm font-semibold text-primary">{c ? money(profit) : '—'}</p><p className="text-[10px] text-muted-foreground">{c ? `${Math.round((profit / p.retailPriceDozen) * 100)}% margin` : 'no cost data'}</p></div></div>; })}</div></Card></div></div>;
+  if (isMobile) { return <div><div className="mb-4 flex items-center justify-between"><h1 className="display text-xl font-semibold">Reports</h1><Button variant="soft" onClick={() => download('little-bliss-orders.csv', `order,customer,total,status\n${store.orders.filter(o => !o.excludeFromRevenue).map(o => `${o.orderNumber},${o.customerName},${calculateOrderTotal(o.items, o.discount, o.deliveryFee, o.taxRate || 0)},${o.paymentStatus}`).join('\n')}`)}><Download size={14} /> CSV</Button></div><div className="mb-3 flex flex-wrap items-center gap-1 rounded-lg border bg-card p-1">{REVENUE_PERIODS.map(p => <button key={p.value} onClick={() => setPeriod(p.value)} className={cx('rounded-md px-2.5 py-1.5 text-[11px] font-semibold', period === p.value ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')}>{p.label}</button>)}</div><div className="grid grid-cols-2 gap-3 mb-4"><Card className="p-4"><p className="text-[10px] text-muted-foreground">Revenue</p><p className="mono mt-1 text-lg font-semibold">{money(revenue)}</p></Card><Card className="p-4"><p className="text-[10px] text-muted-foreground">Costs</p><p className="mono mt-1 text-lg font-semibold">{money(costs)}</p></Card><Card className="p-4"><p className="text-[10px] text-muted-foreground">Expenses</p><p className="mono mt-1 text-lg font-semibold">{money(expenses)}</p></Card><Card className="p-4"><p className="text-[10px] text-muted-foreground">Profit</p><p className={cx('mono mt-1 text-lg font-semibold', revenue - costs - expenses < 0 && 'text-destructive')}>{money(revenue - costs - expenses)}</p></Card></div><Card className="p-4"><h2 className="text-sm font-semibold mb-3">Top products</h2><div className="space-y-2.5">{store.recipes.map(p => { const units = revOrders.reduce((s, o) => s + o.items.filter(i => i.productId === p.id).reduce((a, i) => a + i.quantity, 0), 0); const val = revOrders.reduce((s, o) => s + o.items.filter(i => i.productId === p.id).reduce((a, i) => a + i.quantity * i.unitPrice, 0), 0); return <div key={p.id} className="flex items-center justify-between"><span className="text-sm">{p.name}</span><div className="text-right"><p className="mono text-xs font-semibold">{units} units</p><p className="text-[10px] text-muted-foreground">{money(val)}</p></div></div>; })}</div></Card></div>; }
+  return <div><PageHeader eyebrow="Numbers with context" title="Reports" description="A weekly rhythm for seeing what is working and what to change." action={<Button variant="soft" onClick={() => download('little-bliss-orders.csv', `order,customer,total,status\n${store.orders.filter(o => !o.excludeFromRevenue).map(o => `${o.orderNumber},${o.customerName},${calculateOrderTotal(o.items, o.discount, o.deliveryFee, o.taxRate || 0)},${o.paymentStatus}`).join('\n')}`)}><Download size={16} /> Export CSV</Button>} /><div className="mb-5 flex items-center gap-1 rounded-lg border bg-card p-1 w-fit">{REVENUE_PERIODS.map(p => <button key={p.value} data-testid={`button-period-${p.value}`} onClick={() => setPeriod(p.value)} className={cx('rounded-md px-3 py-1.5 text-xs font-semibold', period === p.value ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')}>{p.label}</button>)}</div><div className="grid gap-5 lg:grid-cols-[1.15fr_.85fr]"><Card className="p-5"><div className="flex items-start justify-between"><div><p className="text-xs text-muted-foreground">{periodLabel} revenue</p><p className="mono mt-2 text-3xl font-semibold">{money(revenue)}</p></div><span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-semibold text-secondary-foreground">{revOrders.length} order{revOrders.length !== 1 ? 's' : ''}</span></div></Card><Card className="p-5"><div className="mb-5 flex items-center justify-between"><div><h2 className="font-semibold">Profitability snapshot</h2><p className="text-xs text-muted-foreground">Estimated margin per product</p></div></div>                <div className="space-y-3">{store.recipes.map(p => { const c = costPerDozen(p, store.ingredients); const profit = roundCurrency(p.retailPriceDozen - c); return <div key={p.id} className="flex items-center justify-between"><div className="flex items-center gap-3"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-secondary text-[10px] font-bold text-secondary-foreground">{store.recipes.indexOf(p) + 1}</span><div><p className="text-sm font-semibold">{p.name}</p><p className="text-[10px] text-muted-foreground">cost {c ? money(c) : '—'}</p></div></div><div className="text-right"><p className="mono text-sm font-semibold text-primary">{c ? money(profit) : '—'}</p><p className="text-[10px] text-muted-foreground">{c ? `${Math.round((profit / p.retailPriceDozen) * 100)}% margin` : 'no cost data'}</p></div></div>; })}</div></Card></div></div>;
 }
 function ReportLine({ label, value, total, color }: { label: string; value: number; total: number; color: string }) { return <div><div className="mb-1.5 flex justify-between text-xs"><span>{label}</span><span className="mono">{money(value)}</span></div><div className="h-2 overflow-hidden rounded-full bg-muted"><div className={cx('h-full rounded-full', color)} style={{ width: `${Math.min(100, value / total * 100)}%` }} /></div></div>; }
 
@@ -715,7 +1543,7 @@ function Budget() {
   const { store, update } = useStore(); const isMobile = useIsMobile(); const [edit, setEdit] = useState<BudgetAllocation | null>(null); const [deletingAlloc, setDeletingAlloc] = useState<BudgetAllocation | null>(null); const [deleteStep, setDeleteStep] = useState(0);
   const now = new Date(); const cm = now.getMonth(); const cy = now.getFullYear();
   const isCurrentMonth = (dateStr: string) => { const d = new Date(dateStr); return d.getMonth() === cm && d.getFullYear() === cy; };
-  const received = store.orders.filter(o => isCurrentMonth(o.orderDate)).reduce((s, o) => s + o.amountPaid, 0);
+  const received = store.orders.filter(o => !o.excludeFromRevenue && isCurrentMonth(o.orderDate)).reduce((s, o) => s + o.amountPaid, 0);
   const expenses = store.expenses.filter(e => isCurrentMonth(e.date)).reduce((s, e) => s + e.amount, 0);
   const available = roundCurrency(received - expenses);
   const allocated = store.allocations.reduce((s, a) => s + (a.mode === 'percent' ? available * a.value / 100 : a.value), 0);
@@ -773,6 +1601,127 @@ function Clients() {
   </div>;
 }
 
+function CustomerAnalytics() {
+  const { store } = useStore();
+  const isMobile = useIsMobile();
+  const customerStats = getCustomerAnalytics(store.orders, store.clients);
+  
+  if (isMobile) {
+    return <div>
+      <div className="mb-4 flex items-center justify-between">
+        <h1 className="display text-xl font-semibold">Customer Analytics</h1>
+      </div>
+      <div className="space-y-4">
+        {customerStats.length > 0 ? (
+          customerStats.slice(0, 10).map((stat, index) => (
+            <Card key={stat.customerName} className="p-4">
+              <div className="flex items-center justify-between mb-3">
+                <p className="font-semibold text-sm">{stat.customerName}</p>
+                <span className="text-xs text-muted-foreground">#{index + 1}</span>
+              </div>
+              <div className="grid grid-cols-2 gap-4 text-xs">
+                <div>
+                  <p className="text-muted-foreground">Total Orders</p>
+                  <p className="mono text-lg font-semibold">{stat.totalOrders}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Total Spent</p>
+                  <p className="mono text-lg font-semibold">{money(stat.totalSpent)}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Avg Order</p>
+                  <p className="mono text-lg font-semibold">{money(stat.avgOrderValue)}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Frequency</p>
+                  <p className="mono text-lg font-semibold">{stat.purchaseFrequency > 0 ? `${stat.purchaseFrequency}d` : '—'}</p>
+                </div>
+              </div>
+            </Card>
+          ))
+        ) : (
+          <Empty icon={Users} title="No customer data yet" detail="Customer analytics will appear once you have orders." />
+        )}
+      </div>
+    </div>;
+  }
+
+  return <div>
+    <PageHeader 
+      eyebrow="Insights" 
+      title="Customer Analytics" 
+      description="Understand your customers' purchasing patterns and value." 
+    />
+    <div className="grid gap-4 xl:grid-cols-4 mb-6">
+      <Card className="p-5">
+        <p className="text-xs text-muted-foreground">Total Customers</p>
+        <p className="mono mt-2 text-3xl font-semibold">{customerStats.length}</p>
+      </Card>
+      <Card className="p-5">
+        <p className="text-xs text-muted-foreground">Total Revenue</p>
+        <p className="mono mt-2 text-3xl font-semibold">{money(customerStats.reduce((sum, c) => sum + c.totalSpent, 0))}</p>
+      </Card>
+      <Card className="p-5">
+        <p className="text-xs text-muted-foreground">Avg Order Value</p>
+        <p className="mono mt-2 text-3xl font-semibold">{money(customerStats.length > 0 ? customerStats.reduce((sum, c) => sum + c.avgOrderValue, 0) / customerStats.length : 0)}</p>
+      </Card>
+      <Card className="p-5">
+        <p className="text-xs text-muted-foreground">Active Customers</p>
+        <p className="mono mt-2 text-3xl font-semibold">{customerStats.filter(c => c.totalOrders > 0).length}</p>
+      </Card>
+    </div>
+    <Card className="overflow-hidden">
+      <div className="border-b px-5 py-4">
+        <h2 className="font-semibold">Top Customers by Revenue</h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">Customer performance metrics and analytics</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[800px] text-left text-sm">
+          <thead className="bg-muted/55 text-xs uppercase tracking-wider text-muted-foreground">
+            <tr>
+              <th className="px-5 py-3.5">Customer</th>
+              <th>Total Orders</th>
+              <th>Total Spent</th>
+              <th>Avg Order</th>
+              <th>Frequency</th>
+              <th>First Order</th>
+              <th>Last Order</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {customerStats.length > 0 ? (
+              customerStats.map((stat, index) => (
+                <tr key={stat.customerName} className="hover:bg-muted/25">
+                  <td className="px-5 py-4">
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-bold text-secondary-foreground">
+                        {stat.customerName.split(' ').map(x => x[0]).join('').slice(0, 2)}
+                      </span>
+                      <p className="font-semibold">{stat.customerName}</p>
+                    </div>
+                  </td>
+                  <td className="mono">{stat.totalOrders}</td>
+                  <td className="mono">{money(stat.totalSpent)}</td>
+                  <td className="mono">{money(stat.avgOrderValue)}</td>
+                  <td className="mono">{stat.purchaseFrequency > 0 ? `${stat.purchaseFrequency} days` : '—'}</td>
+                  <td className="text-xs">{shortDate(stat.firstOrderDate)}</td>
+                  <td className="text-xs">{shortDate(stat.lastOrderDate)}</td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={7} className="px-5 py-8 text-center">
+                  <Empty icon={Users} title="No customer data yet" detail="Customer analytics will appear once you have orders." />
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  </div>;
+}
+
 function ClientModal({ value, onClose, onSave }: { value: Client; onClose: () => void; onSave: (v: Client) => void }) {
   const [c, setC] = useState(value);
   const set = (k: keyof Client, v: string) => setC(x => ({ ...x, [k]: v }));
@@ -803,14 +1752,759 @@ function SettingsPage() {
 }
 function NotFound() { return <div className="flex min-h-[60vh] flex-col items-center justify-center text-center"><span className="rounded-full bg-secondary p-4"><FileText size={24} /></span><h1 className="display mt-5 text-3xl">That shelf is empty.</h1><p className="mt-2 text-sm text-muted-foreground">This page is not part of the bakery desk.</p><Link href="/" className="mt-5 text-sm font-semibold text-primary hover:underline">Return to overview</Link></div>; }
 
-function printWithTitle(title: string) {
-  const prev = document.title;
-  document.title = title;
-  window.print();
-  setTimeout(() => { document.title = prev; }, 1000);
+/* ─── SALES ANALYTICS DASHBOARD ─── */
+function SalesAnalytics() {
+  const { store } = useStore();
+  const [period, setPeriod] = useState<RevenuePeriod>('month');
+  const analytics = useMemo(() => calculateSalesAnalytics(store.orders, store.recipes, period), [store.orders, store.recipes, period]);
+  const isMobile = useIsMobile();
+
+  return <div className="stagger">
+    <PageHeader eyebrow="Analytics" title="Sales Dashboard" description="Track your sales trends, top products, and revenue growth." />
+    <div className="mb-5 flex flex-wrap items-center gap-1 rounded-lg border bg-card p-1 w-fit">
+      {REVENUE_PERIODS.map(p => (
+        <button key={p.value} onClick={() => setPeriod(p.value)} className={cx('rounded-md px-3 py-1.5 text-xs font-semibold', period === p.value ? 'border-primary bg-primary/5 text-primary' : 'text-muted-foreground hover:bg-muted')}>
+          {p.label}
+        </button>
+      ))}
+    </div>
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <Metric label="Total Revenue" value={money(analytics.totalRevenue)} trend={`${analytics.totalOrders} orders`} icon={TrendingUp} tone="primary" note={revenuePeriodLabel(period)} />
+      <Metric label="Average Order" value={money(analytics.averageOrderValue)} trend="per order" icon={Banknote} tone="lime" note="average value" />
+      <Metric label="Total Orders" value={analytics.totalOrders.toString()} trend="processed" icon={Receipt} tone="peach" note="in this period" />
+      <Metric label="Top Product" value={analytics.topProducts[0]?.productName || '—'} trend={analytics.topProducts[0] ? money(analytics.topProducts[0].revenue) : 'No data'} icon={Sparkles} tone="dark" note="best seller" />
+    </div>
+    <div className="mt-5 grid gap-5 xl:grid-cols-2">
+      <Card className="overflow-hidden">
+        <div className="flex items-center justify-between border-b px-5 py-4">
+          <div>
+            <h2 className="font-semibold">Monthly Trend</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">Revenue over the last 12 months</p>
+          </div>
+        </div>
+        <div className="p-5">
+          <div className="flex items-end gap-1 h-40">
+            {analytics.monthlyTrend.map((m, i) => {
+              const maxRevenue = Math.max(...analytics.monthlyTrend.map(x => x.revenue));
+              const height = maxRevenue > 0 ? (m.revenue / maxRevenue) * 100 : 0;
+              return (
+                <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                  <div className={cx('w-full rounded-t-sm', height > 0 ? 'bg-primary' : 'bg-muted')} style={{ height: `${Math.max(4, height)}%` }} />
+                  <span className="text-[9px] text-muted-foreground">{m.month}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </Card>
+      <Card className="overflow-hidden">
+        <div className="flex items-center justify-between border-b px-5 py-4">
+          <div>
+            <h2 className="font-semibold">Category Breakdown</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">Revenue by product category</p>
+          </div>
+        </div>
+        <div className="p-5 space-y-3">
+          {analytics.categoryBreakdown.length ? analytics.categoryBreakdown.map(cat => {
+            const total = analytics.categoryBreakdown.reduce((s, c) => s + c.revenue, 0);
+            const pct = total > 0 ? (cat.revenue / total) * 100 : 0;
+            return (
+              <div key={cat.category}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-sm font-medium">{cat.category}</span>
+                  <span className="mono text-xs font-semibold">{money(cat.revenue)}</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-muted">
+                  <div className="h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
+                </div>
+              </div>
+            );
+          }) : <Empty icon={BarChart3} title="No category data" detail="Sales data will appear here once you have orders." />}
+        </div>
+      </Card>
+    </div>
+    <Card className="mt-5 overflow-hidden">
+      <div className="flex items-center justify-between border-b px-5 py-4">
+        <div>
+          <h2 className="font-semibold">Top Products</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">Best-selling products by revenue</p>
+        </div>
+      </div>
+      <div className="p-5">
+        {analytics.topProducts.length ? (
+          <div className="space-y-3">
+            {analytics.topProducts.map((product, i) => (
+              <div key={product.productId} className="flex items-center justify-between gap-3 p-3 rounded-lg border">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-secondary text-xs font-bold text-secondary-foreground">{i + 1}</span>
+                  <div>
+                    <p className="text-sm font-semibold">{product.productName}</p>
+                    <p className="text-xs text-muted-foreground">{product.quantity} units sold</p>
+                  </div>
+                </div>
+                <span className="mono text-sm font-semibold">{money(product.revenue)}</span>
+              </div>
+            ))}
+          </div>
+        ) : <Empty icon={Box} title="No product data" detail="Product sales will appear here once you have orders." />}
+      </div>
+    </Card>
+  </div>;
 }
 
-function Router() { return <Switch><Route path="/" component={Dashboard} /><Route path="/ingredients" component={Ingredients} /><Route path="/recipes" component={Recipes} /><Route path="/orders" component={Orders} /><Route path="/expenses" component={Expenses} /><Route path="/inventory" component={Inventory} /><Route path="/reports" component={Reports} /><Route path="/budget" component={Budget} /><Route path="/clients" component={Clients} /><Route path="/settings" component={SettingsPage} /><Route path="/audit" component={AuditLog} /><Route path="/more" component={MoreMenu} /><Route component={NotFound} /></Switch>; }
+/* ─── PRODUCTION CALENDAR ─── */
+function ProductionCalendar() {
+  const { store } = useStore();
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
+  const schedules = useMemo(() => generateProductionSchedule(store.orders, store.recipes), [store.orders, store.recipes]);
+  const filteredSchedules = schedules.filter(s => s.date === selectedDate);
+
+  const weekDates = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() + i);
+    return d.toISOString().slice(0, 10);
+  });
+
+  return <div className="stagger">
+    <PageHeader eyebrow="Production" title="Production Calendar" description="View and manage your baking schedule based on order due dates." />
+    <div className="mb-5 flex gap-2 overflow-x-auto pb-2">
+      {weekDates.map(date => {
+        const d = new Date(date);
+        const hasItems = schedules.some(s => s.date === date);
+        return (
+          <button key={date} onClick={() => setSelectedDate(date)} className={cx('flex-shrink-0 rounded-lg border px-4 py-2 text-center min-w-[80px]', selectedDate === date ? 'border-primary bg-primary/5 text-primary' : 'hover:bg-muted')}>
+            <p className="text-[10px] text-muted-foreground">{d.toLocaleDateString('en-US', { weekday: 'short' })}</p>
+            <p className="text-sm font-semibold">{d.getDate()}</p>
+            {hasItems && <span className="mt-1 h-1 w-1 rounded-full bg-primary" />}
+          </button>
+        );
+      })}
+    </div>
+    <Card>
+      <div className="flex items-center justify-between border-b px-5 py-4">
+        <div>
+          <h2 className="font-semibold">{new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">{filteredSchedules.length} items scheduled</p>
+        </div>
+      </div>
+      <div className="p-5">
+        {filteredSchedules.length ? (
+          <div className="space-y-3">
+            {filteredSchedules.map(schedule => (
+              <div key={schedule.id} className="flex items-center justify-between gap-3 p-3 rounded-lg border">
+                <div>
+                  <p className="text-sm font-semibold">{schedule.recipeName}</p>
+                  <p className="text-xs text-muted-foreground">{schedule.quantity} dozens</p>
+                </div>
+                <span className={cx('rounded-full px-2 py-1 text-[10px] font-semibold', schedule.status === 'scheduled' ? 'bg-secondary text-secondary-foreground' : 'bg-primary text-primary-foreground')}>
+                  {schedule.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : <Empty icon={CalendarDays} title="No production scheduled" detail="Items will appear here when orders have due dates within the next 7 days." />}
+      </div>
+    </Card>
+  </div>;
+}
+
+/* ─── PURCHASE ORDERS ─── */
+function PurchaseOrders() {
+  const { store, update } = useStore();
+  const [showGenerate, setShowGenerate] = useState(false);
+  const autoOrders = useMemo(() => generatePurchaseOrders(store.ingredients), [store.ingredients]);
+
+  const handleGenerate = () => {
+    const newOrders = generatePurchaseOrders(store.ingredients);
+    update({ purchaseOrders: [...store.purchaseOrders, ...newOrders] });
+    setShowGenerate(false);
+  };
+
+  return <div className="stagger">
+    <PageHeader eyebrow="Procurement" title="Purchase Orders" description="Manage ingredient reordering when stock runs low." action={<Button onClick={() => setShowGenerate(true)}><RefreshCw size={16} /> Generate Orders</Button>} />
+    {showGenerate && (
+      <Card className="mb-5 border-primary/30 bg-primary/5 p-5">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold">Auto-generate purchase orders</p>
+            <p className="text-xs text-muted-foreground">{autoOrders.length} ingredients are at or below minimum stock</p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={() => setShowGenerate(false)}>Cancel</Button>
+            <Button onClick={handleGenerate}>Generate {autoOrders.length} Orders</Button>
+          </div>
+        </div>
+      </Card>
+    )}
+    <Card>
+      <div className="flex items-center justify-between border-b px-5 py-4">
+        <div>
+          <h2 className="font-semibold">Purchase Orders</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">{store.purchaseOrders.length} orders</p>
+        </div>
+      </div>
+      <div className="p-5">
+        {store.purchaseOrders.length ? (
+          <div className="space-y-3">
+            {store.purchaseOrders.map(po => (
+              <div key={po.id} className="flex items-center justify-between gap-3 p-3 rounded-lg border">
+                <div>
+                  <p className="text-sm font-semibold">{po.ingredientName}</p>
+                  <p className="text-xs text-muted-foreground">{po.supplier} · {po.quantity} {po.unit}</p>
+                </div>
+                <div className="text-right">
+                  <p className="mono text-sm font-semibold">{money(po.estimatedCost)}</p>
+                  <span className={cx('rounded-full px-2 py-0.5 text-[10px] font-semibold', po.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : po.status === 'ordered' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800')}>
+                    {po.status}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : <Empty icon={Package} title="No purchase orders" detail="Generate orders automatically or add them manually when stock is low." />}
+      </div>
+    </Card>
+  </div>;
+}
+
+/* ─── PROFIT MARGIN CALCULATOR ─── */
+function ProfitMargin() {
+  const { store } = useStore();
+
+  const profitData = useMemo(() => {
+    return store.recipes.map(recipe => {
+      const cost = costPerDozen(recipe, store.ingredients);
+      const issues = recipeCostIssues(recipe, store.ingredients);
+      const revenue = recipe.retailPriceDozen;
+      const margin = revenue > 0 ? ((revenue - cost) / revenue) * 100 : 0;
+      return { recipe, cost, revenue, margin, issues };
+    }).sort((a, b) => b.margin - a.margin);
+  }, [store.recipes, store.ingredients]);
+
+  return <div className="stagger">
+    <PageHeader eyebrow="Profitability" title="Profit Margin Calculator" description="Analyze per-product profitability based on ingredient costs." />
+    <Card className="overflow-hidden">
+      <div className="flex items-center justify-between border-b px-5 py-4">
+        <div>
+          <h2 className="font-semibold">Product Profitability</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">Margin analysis for all recipes</p>
+        </div>
+      </div>
+      <div className="p-5">
+        {profitData.length ? (
+          <div className="space-y-3">
+            {profitData.map(({ recipe, cost, revenue, margin, issues }) => (
+              <div key={recipe.id} className="flex items-center justify-between gap-3 p-3 rounded-lg border">
+                <div className="flex-1">
+                  <p className="text-sm font-semibold">{recipe.name}</p>
+                  <p className="text-xs text-muted-foreground">Cost: {money(cost)} · Price: {money(revenue)}</p>
+                  {issues.count > 0 && <p className="mt-0.5 text-[10px] font-medium text-destructive">{recipeIssueLabel(issues)} — margin uses the priced part only</p>}
+                </div>
+                <div className="text-right">
+                  <p className={cx('mono text-sm font-semibold', margin >= 50 ? 'text-primary' : margin >= 30 ? 'text-yellow-600' : 'text-destructive')}>
+                    {margin.toFixed(1)}%
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">margin</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : <Empty icon={CircleDollarSign} title="No recipe data" detail="Add recipes with ingredient costs to see profit margins." />}
+      </div>
+    </Card>
+  </div>;
+}
+
+/* ─── FINANCIAL REPORTS ─── */
+function FinancialReports() {
+  const { store } = useStore();
+  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
+
+  const reportData = useMemo(() => {
+    const monthOrders = store.orders.filter(o => !o.excludeFromRevenue && o.orderDate.startsWith(selectedMonth));
+    const monthExpenses = store.expenses.filter(e => e.date.startsWith(selectedMonth));
+    const revenue = monthOrders.reduce((s, o) => s + calculateOrderTotal(o.items, o.discount, o.deliveryFee, o.taxRate || 0), 0);
+    const expenses = monthExpenses.reduce((s, e) => s + e.amount, 0);
+    const profit = revenue - expenses;
+
+    const expenseBreakdown = new Map<string, number>();
+    monthExpenses.forEach(e => {
+      const existing = expenseBreakdown.get(e.category) || 0;
+      expenseBreakdown.set(e.category, existing + e.amount);
+    });
+
+    return {
+      month: selectedMonth,
+      revenue,
+      expenses,
+      profit,
+      expenseBreakdown: Array.from(expenseBreakdown.entries()).map(([category, amount]) => ({ category, amount })),
+    };
+  }, [store.orders, store.expenses, selectedMonth]);
+
+  return <div className="stagger">
+    <PageHeader eyebrow="Finance" title="Financial Reports" description="Monthly profit & loss and expense breakdown." />
+    <div className="mb-5">
+      <input type="month" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="h-10 rounded-lg border bg-background px-3 text-sm" />
+    </div>
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <Metric label="Revenue" value={money(reportData.revenue)} trend="total sales" icon={TrendingUp} tone="primary" note="this month" />
+      <Metric label="Expenses" value={money(reportData.expenses)} trend="total costs" icon={ArrowDownRight} tone="peach" note="this month" />
+      <Metric label="Profit" value={money(reportData.profit)} trend={reportData.revenue > 0 ? `${((reportData.profit / reportData.revenue) * 100).toFixed(1)}% margin` : '—'} icon={Sparkles} tone={reportData.profit >= 0 ? 'lime' : 'dark'} note="net profit" />
+      <Metric label="Net Margin" value={reportData.revenue > 0 ? `${((reportData.profit / reportData.revenue) * 100).toFixed(1)}%` : '—'} trend="profitability" icon={CircleDollarSign} tone="primary" note="of revenue" />
+    </div>
+    <Card className="mt-5 overflow-hidden">
+      <div className="flex items-center justify-between border-b px-5 py-4">
+        <div>
+          <h2 className="font-semibold">Expense Breakdown</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">By category</p>
+        </div>
+      </div>
+      <div className="p-5 space-y-3">
+        {reportData.expenseBreakdown.length ? reportData.expenseBreakdown.map(cat => {
+          const total = reportData.expenseBreakdown.reduce((s, c) => s + c.amount, 0);
+          const pct = total > 0 ? (cat.amount / total) * 100 : 0;
+          return (
+            <div key={cat.category}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-sm font-medium">{cat.category}</span>
+                <span className="mono text-xs font-semibold">{money(cat.amount)}</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-muted">
+                <div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />
+              </div>
+            </div>
+          );
+        }) : <Empty icon={Wallet} title="No expense data" detail="Expenses will appear here once recorded." />}
+      </div>
+    </Card>
+  </div>;
+}
+
+/* ─── EXPIRATION TRACKING ─── */
+function ExpirationTracking() {
+  const { store, update } = useStore();
+  const today = new Date();
+
+  const expiringSoon = useMemo(() => {
+    return store.ingredients
+      .filter(i => i.expirationDate)
+      .map(i => ({ ...i, daysUntilExpiry: Math.ceil((new Date(i.expirationDate!).getTime() - today.getTime()) / (1000 * 60 * 60 * 24)) }))
+      .filter(i => i.daysUntilExpiry <= 30 && i.daysUntilExpiry >= 0)
+      .sort((a, b) => a.daysUntilExpiry - b.daysUntilExpiry);
+  }, [store.ingredients]);
+
+  const expired = useMemo(() => {
+    return store.ingredients
+      .filter(i => i.expirationDate && new Date(i.expirationDate) < today)
+      .sort((a, b) => new Date(a.expirationDate!).getTime() - new Date(b.expirationDate!).getTime());
+  }, [store.ingredients]);
+
+  return <div className="stagger">
+    <PageHeader eyebrow="Inventory" title="Expiration Tracking" description="Track ingredient expiration dates and get alerts." />
+    {expired.length > 0 && (
+      <Card className="mb-5 border-destructive/30 bg-destructive/5 p-5">
+        <div className="flex items-center gap-3">
+          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-destructive/10 text-destructive"><CircleAlert size={18} /></span>
+          <div>
+            <p className="text-sm font-semibold text-destructive">{expired.length} expired ingredient{expired.length !== 1 ? 's' : ''}</p>
+            <p className="text-xs text-muted-foreground">These items should be discarded or used immediately</p>
+          </div>
+        </div>
+      </Card>
+    )}
+    <div className="grid gap-5 xl:grid-cols-2">
+      <Card>
+        <div className="flex items-center justify-between border-b px-5 py-4">
+          <div>
+            <h2 className="font-semibold">Expiring Soon</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">Within 30 days</p>
+          </div>
+          <span className="rounded-full bg-yellow-100 px-2 py-1 text-xs font-semibold text-yellow-800">{expiringSoon.length}</span>
+        </div>
+        <div className="p-5">
+          {expiringSoon.length ? (
+            <div className="space-y-3">
+              {expiringSoon.map(ing => (
+                <div key={ing.id} className="flex items-center justify-between gap-3 p-3 rounded-lg border">
+                  <div>
+                    <p className="text-sm font-semibold">{ing.name}</p>
+                    <p className="text-xs text-muted-foreground">{new Date(ing.expirationDate!).toLocaleDateString()}</p>
+                  </div>
+                  <span className={cx('rounded-full px-2 py-1 text-[10px] font-semibold', ing.daysUntilExpiry <= 7 ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800')}>
+                    {ing.daysUntilExpiry} day{ing.daysUntilExpiry !== 1 ? 's' : ''}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : <Empty icon={Clock} title="No items expiring soon" detail="Set expiration dates on ingredients to track them here." />}
+        </div>
+      </Card>
+      <Card>
+        <div className="flex items-center justify-between border-b px-5 py-4">
+          <div>
+            <h2 className="font-semibold">Expired</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">Past expiration date</p>
+          </div>
+          <span className="rounded-full bg-destructive/10 px-2 py-1 text-xs font-semibold text-destructive">{expired.length}</span>
+        </div>
+        <div className="p-5">
+          {expired.length ? (
+            <div className="space-y-3">
+              {expired.map(ing => (
+                <div key={ing.id} className="flex items-center justify-between gap-3 p-3 rounded-lg border border-destructive/30 bg-destructive/5">
+                  <div>
+                    <p className="text-sm font-semibold">{ing.name}</p>
+                    <p className="text-xs text-muted-foreground">{new Date(ing.expirationDate!).toLocaleDateString()}</p>
+                  </div>
+                  <span className="rounded-full bg-destructive px-2 py-1 text-[10px] font-semibold text-destructive-foreground">Expired</span>
+                </div>
+              ))}
+            </div>
+          ) : <Empty icon={Check} title="No expired items" detail="Good news — no ingredients have expired." />}
+        </div>
+      </Card>
+    </div>
+  </div>;
+}
+
+/* ─── DELIVERY ROUTES ─── */
+function DeliveryRoutes() {
+  const { store, update } = useStore();
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
+
+  const pendingDeliveries = useMemo(() => {
+    return store.orders
+      .filter(o => o.paymentStatus !== 'Paid' && !o.archived && o.dueDate === selectedDate)
+      .sort((a, b) => a.customerCity.localeCompare(b.customerCity));
+  }, [store.orders, selectedDate]);
+
+  const optimizeRoute = () => {
+    const route: DeliveryRoute = {
+      id: `route-${Date.now()}`,
+      date: selectedDate,
+      orders: pendingDeliveries.map(o => o.id),
+      route: pendingDeliveries.map(o => `${o.customerAddress}, ${o.customerCity}`),
+      estimatedTime: pendingDeliveries.length * 15,
+      status: 'planned',
+      driver: '',
+      notes: '',
+    };
+    update({ deliveryRoutes: [...store.deliveryRoutes, route] });
+  };
+
+  return <div className="stagger">
+    <PageHeader eyebrow="Logistics" title="Delivery Routes" description="Plan and optimize delivery routes based on customer addresses." action={pendingDeliveries.length > 0 && <Button onClick={optimizeRoute}><MapIcon size={16} /> Optimize Route</Button>} />
+    <div className="mb-5">
+      <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="h-10 rounded-lg border bg-background px-3 text-sm" />
+    </div>
+    <Card>
+      <div className="flex items-center justify-between border-b px-5 py-4">
+        <div>
+          <h2 className="font-semibold">Pending Deliveries</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">{pendingDeliveries.length} orders for {new Date(selectedDate).toLocaleDateString()}</p>
+        </div>
+      </div>
+      <div className="p-5">
+        {pendingDeliveries.length ? (
+          <div className="space-y-3">
+            {pendingDeliveries.map(order => (
+              <div key={order.id} className="flex items-center justify-between gap-3 p-3 rounded-lg border">
+                <div>
+                  <p className="text-sm font-semibold">{order.customerName}</p>
+                  <p className="text-xs text-muted-foreground">{order.customerAddress}, {order.customerCity}</p>
+                </div>
+                <span className="text-xs text-muted-foreground">{order.phone}</span>
+              </div>
+            ))}
+          </div>
+        ) : <Empty icon={MapIcon} title="No deliveries scheduled" detail="Select a date with pending orders to plan routes." />}
+      </div>
+    </Card>
+  </div>;
+}
+
+/* ─── WHATSAPP INTEGRATION ─── */
+function WhatsAppIntegration() {
+  const { store, update } = useStore();
+  const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
+
+  const pendingOrders = store.orders.filter(o => o.paymentStatus !== 'Paid' && !o.archived);
+
+  const sendWhatsAppMessage = (order: Order, type: 'confirmation' | 'reminder' | 'update') => {
+    const message: WhatsAppMessage = {
+      id: `wa-${Date.now()}`,
+      orderId: order.id,
+      customerPhone: order.phone,
+      type,
+      message: type === 'confirmation' 
+        ? `Hi ${order.customerName}, your order ${order.orderNumber} has been confirmed. Due: ${order.dueDate}. Total: ${money(calculateOrderTotal(order.items, order.discount, order.deliveryFee, order.taxRate || 0))}. Thank you!`
+        : type === 'reminder'
+        ? `Hi ${order.customerName}, friendly reminder about your order ${order.orderNumber} due on ${order.dueDate}. Payment: ${order.paymentStatus}.`
+        : `Hi ${order.customerName}, update on your order ${order.orderNumber}.`,
+      sentAt: new Date().toISOString(),
+      status: 'pending',
+    };
+    update({ whatsappMessages: [...store.whatsappMessages, message] });
+    
+    // Open WhatsApp with pre-filled message
+    const whatsappUrl = `https://wa.me/${order.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message.message)}`;
+    window.open(whatsappUrl, '_blank');
+  };
+
+  return <div className="stagger">
+    <PageHeader eyebrow="Communication" title="WhatsApp Integration" description="Send order confirmations and payment reminders via WhatsApp." />
+    <Card>
+      <div className="flex items-center justify-between border-b px-5 py-4">
+        <div>
+          <h2 className="font-semibold">Pending Orders</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">{pendingOrders.length} orders that need communication</p>
+        </div>
+      </div>
+      <div className="p-5">
+        {pendingOrders.length ? (
+          <div className="space-y-3">
+            {pendingOrders.map(order => (
+              <div key={order.id} className="flex items-center justify-between gap-3 p-3 rounded-lg border">
+                <div>
+                  <p className="text-sm font-semibold">{order.customerName}</p>
+                  <p className="text-xs text-muted-foreground">{order.orderNumber} · {order.phone}</p>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="soft" className="text-xs" onClick={() => sendWhatsAppMessage(order, 'confirmation')}>Confirm</Button>
+                  <Button variant="soft" className="text-xs" onClick={() => sendWhatsAppMessage(order, 'reminder')}>Remind</Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : <Empty icon={Bell} title="No pending orders" detail="Orders awaiting payment will appear here for WhatsApp communication." />}
+      </div>
+    </Card>
+  </div>;
+}
+
+/* ─── STAFF TASKS ─── */
+function StaffTasks() {
+  const { store, update } = useStore();
+  const [showAddTask, setShowAddTask] = useState(false);
+  const [newTask, setNewTask] = useState<Partial<StaffTask>>({
+    title: '',
+    description: '',
+    assignedTo: '',
+    priority: 'medium',
+    dueDate: new Date().toISOString().slice(0, 10),
+    category: 'other',
+  });
+
+  const addTask = () => {
+    if (!newTask.title) return;
+    const task: StaffTask = {
+      id: `task-${Date.now()}`,
+      title: newTask.title!,
+      description: newTask.description || '',
+      assignedTo: newTask.assignedTo || '',
+      priority: newTask.priority || 'medium',
+      status: 'todo',
+      dueDate: newTask.dueDate!,
+      category: newTask.category || 'other',
+    };
+    update({ staffTasks: [...store.staffTasks, task] });
+    setShowAddTask(false);
+    setNewTask({ title: '', description: '', assignedTo: '', priority: 'medium', dueDate: new Date().toISOString().slice(0, 10), category: 'other' });
+  };
+
+  const toggleTaskStatus = (taskId: string) => {
+    update({
+      staffTasks: store.staffTasks.map(t => 
+        t.id === taskId 
+          ? { ...t, status: t.status === 'completed' ? 'todo' : 'completed', completedAt: t.status === 'completed' ? undefined : new Date().toISOString() }
+          : t
+      ),
+    });
+  };
+
+  const todayTasks = store.staffTasks.filter(t => t.dueDate === new Date().toISOString().slice(0, 10));
+
+  return <div className="stagger">
+    <PageHeader eyebrow="Operations" title="Staff Task Board" description="Manage daily tasks for kitchen staff." action={<Button onClick={() => setShowAddTask(true)}><Plus size={16} /> Add Task</Button>} />
+    {showAddTask && (
+      <Card className="mb-5 p-5">
+        <h3 className="font-semibold mb-4">New Task</h3>
+        <div className="space-y-3">
+          <Field label="Task title"><Input value={newTask.title} onChange={e => setNewTask({ ...newTask, title: e.target.value })} /></Field>
+          <Field label="Description"><textarea className="min-h-16 w-full rounded-lg border bg-background p-3 text-sm" value={newTask.description} onChange={e => setNewTask({ ...newTask, description: e.target.value })} /></Field>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Assigned to"><Input value={newTask.assignedTo} onChange={e => setNewTask({ ...newTask, assignedTo: e.target.value })} /></Field>
+            <Field label="Priority"><Select value={newTask.priority} onChange={e => setNewTask({ ...newTask, priority: e.target.value as 'low' | 'medium' | 'high' })}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></Select></Field>
+          </div>
+          <Field label="Due date"><Input type="date" value={newTask.dueDate} onChange={e => setNewTask({ ...newTask, dueDate: e.target.value })} /></Field>
+          <Field label="Category"><Select value={newTask.category} onChange={e => setNewTask({ ...newTask, category: e.target.value as any })}><option value="baking">Baking</option><option value="cleaning">Cleaning</option><option value="inventory">Inventory</option><option value="delivery">Delivery</option><option value="other">Other</option></Select></Field>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={() => setShowAddTask(false)}>Cancel</Button>
+            <Button onClick={addTask}>Add Task</Button>
+          </div>
+        </div>
+      </Card>
+    )}
+    <Card>
+      <div className="flex items-center justify-between border-b px-5 py-4">
+        <div>
+          <h2 className="font-semibold">Today's Tasks</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">{todayTasks.length} tasks for today</p>
+        </div>
+      </div>
+      <div className="p-5">
+        {todayTasks.length ? (
+          <div className="space-y-3">
+            {todayTasks.map(task => (
+              <div key={task.id} className={cx('flex items-center justify-between gap-3 p-3 rounded-lg border', task.status === 'completed' && 'bg-muted/30')}>
+                <div className="flex items-center gap-3">
+                  <button onClick={() => toggleTaskStatus(task.id)} className={cx('h-5 w-5 rounded border', task.status === 'completed' ? 'bg-primary border-primary' : 'border-muted-foreground')}>
+                    {task.status === 'completed' && <Check size={12} className="text-primary-foreground" />}
+                  </button>
+                  <div>
+                    <p className={cx('text-sm font-semibold', task.status === 'completed' && 'line-through text-muted-foreground')}>{task.title}</p>
+                    <p className="text-xs text-muted-foreground">{task.assignedTo || 'Unassigned'} · {task.category}</p>
+                  </div>
+                </div>
+                <span className={cx('rounded-full px-2 py-0.5 text-[10px] font-semibold', task.priority === 'high' ? 'bg-red-100 text-red-800' : task.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800')}>
+                  {task.priority}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : <Empty icon={ClipboardList} title="No tasks for today" detail="Add tasks to keep your kitchen organized and efficient." />}
+      </div>
+    </Card>
+  </div>;
+}
+
+/* ─── BACKUP & RESTORE ─── */
+function BackupRestore() {
+  const { store, update } = useStore();
+  const [lastBackup, setLastBackup] = useState<string | null>(null);
+
+  const createBackup = () => {
+    const backup: BackupRecord = {
+      id: `backup-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      size: JSON.stringify(store).length,
+      location: 'local',
+      status: 'success',
+      checksum: Date.now().toString(),
+    };
+    update({ backupRecords: [...store.backupRecords, backup] });
+    setLastBackup(new Date().toISOString());
+    
+    // Download backup file
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(store, null, 2)], { type: 'application/json' }));
+    a.download = `little-bliss-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+  };
+
+  const restoreBackup = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result)) as Store;
+        if (parsed.recipes && parsed.ingredients && parsed.settings) {
+          if (window.confirm('This will replace all current data. Continue?')) {
+            update(parsed);
+          }
+        }
+      } catch {
+        window.alert('That backup could not be read.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  return <div className="stagger">
+    <PageHeader eyebrow="Data" title="Backup & Restore" description="Create backups and restore your bakery data." />
+    <div className="grid gap-5 xl:grid-cols-2">
+      <Card className="p-5">
+        <div className="mb-4 flex items-center gap-3">
+          <span className="rounded-lg bg-secondary p-2"><Archive size={18} /></span>
+          <div>
+            <h2 className="font-semibold">Create Backup</h2>
+            <p className="text-xs text-muted-foreground">Download a complete backup of your data</p>
+          </div>
+        </div>
+        <Button onClick={createBackup} className="w-full"><Download size={16} /> Download Backup</Button>
+        {lastBackup && <p className="mt-3 text-xs text-muted-foreground">Last backup: {new Date(lastBackup).toLocaleString()}</p>}
+      </Card>
+      <Card className="p-5">
+        <div className="mb-4 flex items-center gap-3">
+          <span className="rounded-lg bg-primary/10 p-2 text-primary"><Upload size={18} /></span>
+          <div>
+            <h2 className="font-semibold">Restore Backup</h2>
+            <p className="text-xs text-muted-foreground">Restore from a previously saved backup file</p>
+          </div>
+        </div>
+        <input type="file" accept=".json" onChange={restoreBackup} className="hidden" id="restore-file" />
+        <Button variant="soft" className="w-full" onClick={() => document.getElementById('restore-file')?.click()}><Upload size={16} /> Select Backup File</Button>
+      </Card>
+    </div>
+    <Card className="mt-5 overflow-hidden">
+      <div className="flex items-center justify-between border-b px-5 py-4">
+        <div>
+          <h2 className="font-semibold">Backup History</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">{store.backupRecords.length} backups</p>
+        </div>
+      </div>
+      <div className="p-5">
+        {store.backupRecords.length ? (
+          <div className="space-y-3">
+            {store.backupRecords.slice().reverse().map(backup => (
+              <div key={backup.id} className="flex items-center justify-between gap-3 p-3 rounded-lg border">
+                <div>
+                  <p className="text-sm font-semibold">{new Date(backup.timestamp).toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground">{(backup.size / 1024).toFixed(2)} KB · {backup.location}</p>
+                </div>
+                <span className={cx('rounded-full px-2 py-0.5 text-[10px] font-semibold', backup.status === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800')}>
+                  {backup.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : <Empty icon={Archive} title="No backups yet" detail="Create your first backup to secure your data." />}
+      </div>
+    </Card>
+  </div>;
+}
+
+function printWithTitle(title: string, opts?: { landscape?: boolean }) {
+  const prev = document.title;
+  const pageRule = document.getElementById('lb-print-page') || document.createElement('style');
+  pageRule.id = 'lb-print-page';
+  pageRule.textContent = opts?.landscape
+    ? '@page { size: A4 landscape; margin: 12mm 14mm; }'
+    : '@page { size: A4 portrait; margin: 10mm; }';
+  if (!pageRule.parentNode) document.head.appendChild(pageRule);
+
+  document.title = title;
+  document.body.classList.add('printing-doc');
+
+  let done = false;
+  const cleanup = () => {
+    if (done) return;
+    done = true;
+    window.removeEventListener('afterprint', cleanup);
+    document.title = prev;
+    document.body.classList.remove('printing-doc');
+    pageRule.remove();
+  };
+
+  window.addEventListener('afterprint', cleanup);
+  window.print();
+  // Fallback for engines that skip or delay afterprint (print-to-PDF, WebViews)
+  setTimeout(cleanup, 2000);
+}
+
+function Router() { return <Switch><Route path="/" component={Dashboard} /><Route path="/ingredients" component={Ingredients} /><Route path="/recipes" component={Recipes} /><Route path="/orders" component={Orders} /><Route path="/expenses" component={Expenses} /><Route path="/inventory" component={Inventory} /><Route path="/reports" component={Reports} /><Route path="/budget" component={Budget} /><Route path="/clients" component={Clients} /><Route path="/customer-analytics" component={CustomerAnalytics} /><Route path="/sales-analytics" component={SalesAnalytics} /><Route path="/production-calendar" component={ProductionCalendar} /><Route path="/purchase-orders" component={PurchaseOrders} /><Route path="/profit-margin" component={ProfitMargin} /><Route path="/financial-reports" component={FinancialReports} /><Route path="/expiration-tracking" component={ExpirationTracking} /><Route path="/delivery-routes" component={DeliveryRoutes} /><Route path="/whatsapp-integration" component={WhatsAppIntegration} /><Route path="/staff-tasks" component={StaffTasks} /><Route path="/backup-restore" component={BackupRestore} /><Route path="/settings" component={SettingsPage} /><Route path="/audit" component={AuditLog} /><Route path="/more" component={MoreMenu} /><Route component={NotFound} /></Switch>; }
 export default function App() {
   const [store, setStore] = useState<Store>(() => loadStore());
   const update = (patch: Partial<Store>) => setStore(current => { const next = { ...current, ...patch }; saveStore(next); return next; });

@@ -1,4 +1,4 @@
-import { unitCost, costOfRecipe, ingredientUsageForOrder, calculateOrderTotal, calculateOrderCost, roundCurrency, type Order, type OrderItem, type Store } from '@/lib/store';
+import { unitCost, costOfRecipe, batchesFor, ingredientUsageForOrder, convertQty, calculateOrderTotal, calculateOrderCost, roundCurrency, type Order, type OrderItem, type Store } from '@/lib/store';
 
 type BakingReportDocumentProps = {
   order: Order;
@@ -18,25 +18,28 @@ const rd = (v: string) =>
 export function BakingReportDocument({ order, store }: BakingReportDocumentProps) {
   const orderTotal = calculateOrderTotal(order.items, order.discount, order.deliveryFee, order.taxRate || 0);
   const orderCost = calculateOrderCost(order.items);
-  const usage = ingredientUsageForOrder(order, store.recipes);
+  const usage = ingredientUsageForOrder(order, store.recipes, store.ingredients);
   const linkedExpenses = store.expenses.filter(e => e.relatedOrderId === order.id);
   const totalExpenses = linkedExpenses.reduce((s, e) => s + e.amount, 0);
   const profit = orderTotal - orderCost - totalExpenses;
 
   const perProduct = order.items.map(item => {
     const recipe = store.recipes.find(r => r.id === item.productId);
-    const batches = recipe ? Math.ceil(item.quantity / recipe.batchYield) : 0;
+    const batches = recipe ? batchesFor(item.quantity, recipe.batchYield) : 0;
     const ingredients = recipe ? recipe.ingredients.map(row => {
       const ing = store.ingredients.find(i => i.id === row.ingredientId);
-      const usedQty = row.quantity * batches;
+      const recipeQty = row.quantity * batches;
       const up = ing ? unitCost(ing) : null;
+      // "Left" has to sit in the pantry's unit, so convert first. When the two
+      // units cannot be bridged we show the recipe figure and withhold the rest.
+      const usedQty = ing ? convertQty(recipeQty, row.unit, ing.unit) : null;
       return {
-        name: ing?.name || 'Unknown',
-        unit: row.unit,
-        usedQty,
-        currentStock: ing?.currentStock || 0,
-        remaining: Math.max(0, (ing?.currentStock || 0) - usedQty),
-        cost: up !== null ? roundCurrency(up * usedQty) : null,
+        name: ing?.name || 'Unknown ingredient',
+        unit: usedQty !== null && ing ? ing.unit : row.unit,
+        usedQty: usedQty !== null ? usedQty : recipeQty,
+        remaining: usedQty !== null && ing ? Math.max(0, ing.currentStock - usedQty) : null,
+        cost: usedQty !== null && up !== null ? roundCurrency(up * usedQty) : null,
+        issue: !ing ? 'not in pantry' : usedQty === null ? 'unit mismatch' : null,
       };
     }) : [];
     const batchCost = recipe ? costOfRecipe(recipe, store.ingredients) : 0;
@@ -115,7 +118,7 @@ export function BakingReportDocument({ order, store }: BakingReportDocumentProps
           <div key={idx} className="report-product-block">
             <div className="report-product-header">
               <strong>{pp.recipe?.name || 'Unknown'}</strong>
-              <span>{pp.quantity} units · {pp.batches.toFixed(1)} batches</span>
+              <span>{pp.quantity} dozen · {pp.batches} batch{pp.batches !== 1 ? 'es' : ''}</span>
               <span className="mono">{rp(pp.lineRevenue)}</span>
             </div>
             {pp.ingredients.length > 0 ? (
@@ -131,9 +134,9 @@ export function BakingReportDocument({ order, store }: BakingReportDocumentProps
                 <tbody>
                   {pp.ingredients.map((ing, j) => (
                     <tr key={j}>
-                      <td>{ing.name}</td>
+                      <td>{ing.name}{ing.issue && <span className="report-negative"> ({ing.issue})</span>}</td>
                       <td className="right mono">{ing.usedQty.toFixed(0)} {ing.unit}</td>
-                      <td className={`right mono ${ing.remaining <= 0 ? 'report-negative' : ''}`}>{ing.remaining.toFixed(0)} {ing.unit}</td>
+                      <td className={`right mono ${ing.remaining !== null && ing.remaining <= 0 ? 'report-negative' : ''}`}>{ing.remaining !== null ? `${ing.remaining.toFixed(0)} ${ing.unit}` : '—'}</td>
                       <td className="right mono">{ing.cost !== null ? rp(ing.cost) : '—'}</td>
                     </tr>
                   ))}

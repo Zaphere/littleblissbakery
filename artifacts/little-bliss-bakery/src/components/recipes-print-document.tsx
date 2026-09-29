@@ -1,4 +1,5 @@
-import { costOfRecipe, type Recipe, type Store } from '@/lib/store';
+import { Fragment } from 'react';
+import { costOfRecipe, recipeCostIssues, recipeIssueLabel, type Recipe, type Store } from '@/lib/store';
 
 type RecipesPrintDocumentProps = {
   recipes: Recipe[];
@@ -32,48 +33,78 @@ export function RecipesPrintDocument({ recipes, store }: RecipesPrintDocumentPro
       </header>
 
       <section className="report-products">
-        {recipes.map((recipe) => {
+        {recipes.map((recipe, index) => {
           const batchCost = costOfRecipe(recipe, store.ingredients);
-          const missing = recipe.ingredients.filter(row => {
-            const ing = store.ingredients.find(i => i.id === row.ingredientId);
-            return !ing || !unitCost(ing);
-          }).length;
+          const issues = recipeCostIssues(recipe, store.ingredients);
 
           return (
-            <div key={recipe.id} className="report-product-block">
-              <div className="report-product-header">
-                <strong>{recipe.name || 'Unnamed Recipe'}</strong>
-                <span>Yield: {recipe.batchYield} · {recipe.ingredients.length} ingredients</span>
-                <span className="mono">{missing ? 'Needs pricing' : rp(batchCost)}</span>
-              </div>
-              <table className="report-table">
-                <thead>
-                  <tr>
-                    <th>Ingredient</th>
-                    <th className="right">Quantity</th>
-                    <th className="right">Unit</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recipe.ingredients.map((row, idx) => {
-                    const ing = store.ingredients.find(i => i.id === row.ingredientId);
-                    return (
-                      <tr key={idx}>
-                        <td>{ing?.name || 'Unknown'}</td>
-                        <td className="right mono">{row.quantity}</td>
-                        <td className="right">{row.unit}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              {(recipe.doughWeight > 0 || recipe.finishedWeight > 0) && (
-                <div className="report-product-footer">
-                  {recipe.doughWeight > 0 && <span>Dough weight: <strong className="mono">{recipe.doughWeight}g</strong></span>}
-                  {recipe.finishedWeight > 0 && <span> · Finished: <strong className="mono">{recipe.finishedWeight}g</strong></span>}
+            <Fragment key={recipe.id}>
+              <div className="recipe-page">
+              <div className="report-product-block recipe-card">
+                <div className="report-product-header">
+                  <strong>{recipe.name || 'Unnamed Recipe'}</strong>
+                  <span>Yield: {recipe.batchYield} · {recipe.ingredients.length} ingredients</span>
+                  <span className="mono">{rp(batchCost)}{issues.count > 0 && <em className="report-negative ml-1 not-italic">({recipeIssueLabel(issues)})</em>}</span>
                 </div>
-              )}
-            </div>
+
+                <div className="recipe-baking-info">
+                  <div className="recipe-baking-item">
+                    <span className="recipe-baking-label">Oven Temp</span>
+                    <span className="recipe-baking-value">{recipe.ovenTemp || '170-180°C'}</span>
+                  </div>
+                  <div className="recipe-baking-item">
+                    <span className="recipe-baking-label">Bake Time</span>
+                    <span className="recipe-baking-value">{recipe.bakeTimeMinutes || 14} min</span>
+                  </div>
+                  <div className="recipe-baking-item">
+                    <span className="recipe-baking-label">Batch Yield</span>
+                    <span className="recipe-baking-value">{recipe.batchYield} pcs</span>
+                  </div>
+                  <div className="recipe-baking-item">
+                    <span className="recipe-baking-label">Dozens / batch</span>
+                    <span className="recipe-baking-value">{(recipe.batchYield / 12).toFixed(1)} dozen</span>
+                  </div>
+                </div>
+
+                <table className="report-table">
+                  <thead>
+                    <tr>
+                      <th>Ingredient</th>
+                      <th className="right">Quantity</th>
+                      <th className="right">Unit</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recipe.ingredients.map((row, idx) => {
+                      const ing = store.ingredients.find(i => i.id === row.ingredientId);
+                      return (
+                        <tr key={idx}>
+                          <td>{ing?.name || 'Unknown'}</td>
+                          <td className="right mono">{row.quantity}</td>
+                          <td className="right">{row.unit}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+
+                {(recipe.doughWeight > 0 || recipe.finishedWeight > 0) && (
+                  <div className="report-product-footer">
+                    {recipe.doughWeight > 0 && <span>Dough weight: <strong className="mono">{recipe.doughWeight}g</strong></span>}
+                    {recipe.finishedWeight > 0 && <span> · Finished: <strong className="mono">{recipe.finishedWeight}g</strong></span>}
+                  </div>
+                )}
+
+                {recipe.notes && (
+                  <div className="recipe-notes">
+                    <span className="recipe-notes-label">Notes:</span> {recipe.notes}
+                  </div>
+                )}
+              </div>
+              </div>
+
+              {index < recipes.length - 1 && <div className="recipe-page-break" />}
+            </Fragment>
           );
         })}
       </section>
@@ -84,8 +115,4 @@ export function RecipesPrintDocument({ recipes, store }: RecipesPrintDocumentPro
       </footer>
     </article>
   );
-}
-
-function unitCost(i: { packSize: number; purchasePrice: number }): number | null {
-  return i.packSize > 0 && i.purchasePrice > 0 ? i.purchasePrice / i.packSize : null;
 }

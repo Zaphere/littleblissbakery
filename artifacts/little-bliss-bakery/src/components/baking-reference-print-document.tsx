@@ -31,9 +31,12 @@ export function BakingReferencePrintDocument({ recipes }: BakingReferencePrintDo
       <section className="baking-ref-grid">
         {recipes.map((recipe) => {
           const isPies = recipe.category === 'Pies';
-          const isTarts = recipe.category === 'Tarts';
           const yieldCount = recipe.batchYield || 24;
           const pieCount = yieldCount / 2;
+          // Category-derived unit noun — the old version said "Cookies" for
+          // every non-tart recipe regardless of what it actually was.
+          const rawUnit = (recipe.category || 'Piece').trim();
+          const unitNoun = /s$/i.test(rawUnit) ? rawUnit : `${rawUnit}s`;
 
           return (
             <div key={recipe.id} className="baking-ref-card-print">
@@ -52,14 +55,14 @@ export function BakingReferencePrintDocument({ recipes }: BakingReferencePrintDo
                       <td className="baking-ref-label">1 Batch</td>
                       <td className="baking-ref-equals">=</td>
                       <td className="baking-ref-value">
-                        {isPies ? `${yieldCount} Cookies = ${pieCount} Pies` : isTarts ? `${yieldCount} Tarts` : `${yieldCount} Cookies`}
+                        {isPies ? `${yieldCount} Cookies = ${pieCount} Pies` : `${yieldCount} ${unitNoun}`}
                       </td>
                     </tr>
                     <tr>
                       <td className="baking-ref-label">1 Dozen</td>
                       <td className="baking-ref-equals">=</td>
                       <td className="baking-ref-value">
-                        {isPies ? '12 Cookies = 6 Pies' : isTarts ? '12 Tarts' : '12 Cookies'}
+                        {isPies ? '12 Cookies = 6 Pies' : `12 ${unitNoun}`}
                       </td>
                     </tr>
                     <tr className="baking-ref-divider-row">

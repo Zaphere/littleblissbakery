@@ -1,0 +1,40 @@
+{
+  "name": "Little Bliss Bakery",
+  "short_name": "Little Bliss",
+  "description": "Bakery management — orders, recipes, ingredients and inventory. Works offline once installed.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#C45C3A",
+  "background_color": "#F9F6F0",
+  "lang": "en",
+  "categories": ["business", "productivity"],
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/little-bliss-logo.jpg",
+      "sizes": "150x150",
+      "type": "image/jpeg",
+      "purpose": "any"
+    }
+  ]
+}

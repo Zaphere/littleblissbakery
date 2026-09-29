@@ -1,4 +1,4 @@
-import { costOfRecipe, ingredientUsageForOrder, type Order, type Store } from '@/lib/store';
+import { batchesFor, unitsFor, type Order, type Store } from '@/lib/store';
 
 type KitchenOrderDocumentProps = {
   order: Order;
@@ -13,11 +13,9 @@ const rd = (v: string) =>
   });
 
 export function KitchenOrderDocument({ order, store }: KitchenOrderDocumentProps) {
-  const usage = ingredientUsageForOrder(order, store.recipes);
-
   const perProduct = order.items.map(item => {
     const recipe = store.recipes.find(r => r.id === item.productId);
-    const batches = recipe ? Math.ceil(item.quantity / recipe.batchYield) : 0;
+    const batches = recipe ? batchesFor(item.quantity, recipe.batchYield) : 0;
     const ingredients = recipe ? recipe.ingredients.map(row => {
       const ing = store.ingredients.find(i => i.id === row.ingredientId);
       const usedQty = row.quantity * batches;
@@ -38,7 +36,7 @@ export function KitchenOrderDocument({ order, store }: KitchenOrderDocumentProps
   });
 
   const totalBatches = perProduct.reduce((s, p) => s + p.batches, 0);
-  const totalUnits = perProduct.reduce((s, p) => s + p.quantity, 0);
+  const totalUnits = perProduct.reduce((s, p) => s + unitsFor(p.quantity), 0);
 
   return (
     <article className="printable-kitchen kitchen-paper" aria-label={`Kitchen order for ${order.invoiceNumber}`}>
@@ -113,7 +111,7 @@ export function KitchenOrderDocument({ order, store }: KitchenOrderDocumentProps
                 <strong>{pp.recipe?.name || 'Unknown'}</strong>
               </div>
               <div className="kitchen-product-meta">
-                <span className="kitchen-badge">{pp.quantity} units</span>
+                <span className="kitchen-badge">{pp.quantity} dozen</span>
                 <span className="kitchen-badge kitchen-badge-batches">{pp.batches} batch{pp.batches !== 1 ? 'es' : ''}</span>
               </div>
             </div>
@@ -135,7 +133,7 @@ export function KitchenOrderDocument({ order, store }: KitchenOrderDocumentProps
               <div className="kitchen-baking-item">
                 <div>
                   <span className="kitchen-baking-label">Per Batch</span>
-                  <span className="kitchen-baking-value">{pp.recipe?.batchYield || '—'} units</span>
+                  <span className="kitchen-baking-value">{pp.recipe?.batchYield || '—'} pcs</span>
                 </div>
               </div>
             </div>

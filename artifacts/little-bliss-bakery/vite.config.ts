@@ -3,9 +3,11 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 
+import { serviceWorkerPlugin } from './scripts/sw-plugin.js';
+
 export default defineConfig({
   base: '/',
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), serviceWorkerPlugin()],
   resolve: {
     alias: {
       '@': path.resolve(import.meta.dirname, 'src'),
