@@ -1,0 +1,151 @@
+@import 'tailwindcss';
+
+/* ---------------------------------------------------------------------------
+   Little Bliss Bakery — storefront design tokens
+   Pulled from the existing brand: berry, pistachio, peach on warm cream.
+--------------------------------------------------------------------------- */
+@theme {
+  --color-background: hsl(37 45% 97%);
+  --color-surface: hsl(40 50% 99%);
+  --color-ink: hsl(338 25% 17%);
+  --color-ink-soft: hsl(338 12% 42%);
+
+  --color-berry: hsl(338 45% 39%);
+  --color-berry-deep: hsl(338 52% 29%);
+  --color-berry-tint: hsl(338 40% 94%);
+
+  --color-pistachio: hsl(78 42% 60%);
+  --color-pistachio-deep: hsl(78 38% 40%);
+  --color-pistachio-tint: hsl(78 46% 93%);
+
+  --color-peach: hsl(24 78% 72%);
+  --color-peach-deep: hsl(24 68% 52%);
+  --color-peach-tint: hsl(28 80% 94%);
+
+  --color-honey: hsl(43 70% 58%);
+  --color-sky: hsl(203 42% 55%);
+  --color-cocoa: hsl(24 40% 30%);
+  --color-oat: hsl(37 32% 91%);
+  --color-cream: hsl(40 55% 95%);
+
+  --font-display: 'Fraunces', ui-serif, Georgia, serif;
+  --font-sans: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  --shadow-card: 0 1px 2px hsl(338 30% 20% / 0.05), 0 10px 28px -12px hsl(338 35% 25% / 0.18);
+  --shadow-lift: 0 2px 6px hsl(338 30% 20% / 0.06), 0 26px 50px -22px hsl(338 40% 25% / 0.35);
+  --shadow-float: 0 18px 40px -18px hsl(338 45% 25% / 0.4);
+
+  --radius-card: 1.35rem;
+  --radius-pill: 999px;
+}
+
+/* --------------------------------------------------------------------------
+   Base
+-------------------------------------------------------------------------- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(37 25% 80%) transparent;
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 5.5rem;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+::selection {
+  background: hsl(338 45% 39% / 0.18);
+}
+
+/* Fraunces is a soft, wonky serif — let it look like one. */
+.font-display {
+  font-family: var(--font-display);
+  font-variation-settings: 'SOFT' 40, 'WONK' 1;
+  letter-spacing: -0.02em;
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+/* --------------------------------------------------------------------------
+   Texture — flour dust, paper grain, soft vignette
+-------------------------------------------------------------------------- */
+.grain {
+  position: relative;
+}
+.grain::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.4;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='.32'/%3E%3C/svg%3E");
+}
+
+.ph {
+  position: relative;
+  overflow: hidden;
+}
+.ph::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 90% at 50% 0%, transparent 55%, hsl(338 35% 20% / 0.16) 100%),
+    linear-gradient(180deg, hsl(40 60% 98% / 0.1), transparent 40%);
+}
+
+/* Dotted "baked goods" rule used between sections */
+.scallop {
+  height: 14px;
+  background-image: radial-gradient(circle at 7px 0, transparent 6px, currentColor 6.5px);
+  background-size: 22px 14px;
+  background-repeat: repeat-x;
+}
+
+/* --------------------------------------------------------------------------
+   Motion
+-------------------------------------------------------------------------- */
+@keyframes drift {
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(var(--r, 0deg)); }
+  50% { transform: translate3d(0, -14px, 0) rotate(calc(var(--r, 0deg) + 3deg)); }
+}
+.animate-drift { animation: drift 7s ease-in-out infinite; }
+.animate-drift-slow { animation: drift 11s ease-in-out infinite; }
+
+@keyframes steam {
+  0% { opacity: 0; transform: translateY(6px) scaleX(0.9); }
+  40% { opacity: 0.7; }
+  100% { opacity: 0; transform: translateY(-26px) scaleX(1.25); }
+}
+.animate-steam > * { animation: steam 3.2s ease-in-out infinite; }
+.animate-steam > *:nth-child(2) { animation-delay: 0.9s; }
+.animate-steam > *:nth-child(3) { animation-delay: 1.8s; }
+
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.animate-marquee { animation: marquee 34s linear infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .animate-drift, .animate-drift-slow, .animate-marquee,
+  .animate-steam > * { animation: none !important; }
+}
