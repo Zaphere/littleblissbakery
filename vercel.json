@@ -2,6 +2,5 @@
   "buildCommand": "pnpm build",
   "outputDirectory": "dist",
   "framework": null,
-  "installCommand": "pnpm install",
-  "rootDirectory": "artifacts/little-bliss-website"
+  "installCommand": "pnpm install"
 }
