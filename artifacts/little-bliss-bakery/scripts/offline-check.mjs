@@ -119,8 +119,13 @@ try {
         const name = keys.find((k) => k.startsWith('lb-precache'));
         const cached = name ? (await (await caches.open(name)).keys()).map((r) => new URL(r.url).pathname) : [];
         const runtimeName = keys.find((k) => k.startsWith('lb-runtime'));
-        const runtimeHosts = runtimeName
-          ? [...new Set((await (await caches.open(runtimeName)).keys()).map((r) => new URL(r.url).host))]
+        // Only genuinely foreign origins count. The runtime cache legitimately
+        // holds same-origin entries (the browser re-fetches /sw.js to check for
+        // updates), so comparing raw hosts made this check fail intermittently.
+        const runtimeOrigins = runtimeName
+          ? [...new Set((await (await caches.open(runtimeName)).keys())
+              .map((r) => new URL(r.url).origin)
+              .filter((origin) => origin !== location.origin))]
           : [];
         return {
           registered: !!existing,
@@ -129,7 +134,7 @@ try {
           readyTimedOut: reg === '__timeout__',
           scope: reg && reg.scope,
           keys, cached,
-          runtimeHosts,
+          runtimeOrigins,
           controller: !!navigator.serviceWorker.controller,
         };
       })()
@@ -141,8 +146,8 @@ try {
   if (!online.swState.controller) throw new Error('service worker never took control');
   if (!online.swState.cached.includes('/fonts/fonts.css')) throw new Error('fonts.css was not precached');
   if (!online.swState.cached.some((entry) => entry.endsWith('.woff2'))) throw new Error('no .woff2 files precached');
-  if (online.swState.runtimeHosts.length) {
-    throw new Error('cross-origin requests happened: ' + online.swState.runtimeHosts.join(', '));
+  if (online.swState.runtimeOrigins.length) {
+    throw new Error('cross-origin requests happened: ' + online.swState.runtimeOrigins.join(', '));
   }
 
   // Pull the plug: no more origin at all.
@@ -181,6 +186,34 @@ try {
   log('6. OFFLINE deep link /orders rendered:', deep);
   if (!deep) throw new Error('OFFLINE: /orders did not render');
 
+  /* The backup screen must be fully usable with no network at all — taking a
+     snapshot writes to IndexedDB, and nothing on the page may block on the sync
+     endpoint. A page that renders but cannot snapshot would mean a bakery in the
+     loading bay cannot back anything up. */
+  await cdp.send('Page.navigate', { url: APP + 'backup-restore' }, sessionId);
+  await sleep(3000);
+  const backupOffline = await evaluate(cdp, sessionId, `(async () => {
+    const root = document.getElementById('root');
+    const text = document.body.innerText || '';
+    const opened = new Promise(resolve => {
+      const req = indexedDB.open('little-bliss-snapshots', 1);
+      req.onsuccess = () => { req.result.close(); resolve(true); };
+      req.onerror = () => resolve(false);
+      setTimeout(() => resolve(false), 3000);
+    });
+    return {
+      rendered: root.childElementCount > 0,
+      mentionsHistory: text.includes('Backup history'),
+      showsSyncPanel: text.includes('Shared backup'),
+      indexedDbWorks: await opened,
+    };
+  })()`);
+  log('7. OFFLINE backup page:', JSON.stringify(backupOffline));
+  if (!backupOffline.rendered) throw new Error('OFFLINE: /backup-restore did not render');
+  if (!backupOffline.mentionsHistory) throw new Error('OFFLINE: backup history section missing');
+  if (!backupOffline.showsSyncPanel) throw new Error('OFFLINE: sync panel missing');
+  if (!backupOffline.indexedDbWorks) throw new Error('OFFLINE: snapshot storage unavailable');
+
   // Typography must survive with the network gone too, not just the shell.
   const fonts = await evaluate(cdp, sessionId, `
     (async () => {
@@ -201,7 +234,7 @@ try {
       };
     })()
   `);
-  log('7. OFFLINE fonts:', JSON.stringify(fonts, null, 2));
+  log('8. OFFLINE fonts:', JSON.stringify(fonts, null, 2));
   if (!fonts.dm400 || !fonts.dm700 || !fonts.fraunces || !fonts.mono) {
     throw new Error('OFFLINE: a font face did not load from the cache');
   }

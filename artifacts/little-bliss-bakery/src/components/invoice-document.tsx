@@ -61,7 +61,7 @@ export function InvoiceDocument({ order, recipes, settings }: InvoiceDocumentPro
           <h2>Order Details</h2>
           <dl>
             <div><dt>Date</dt><dd>{invoiceDate(order.orderDate)}</dd></div>
-            <div><dt>Order No.</dt><dd>{order.orderNumber || '—'}</dd></div>
+            <div><dt>Due Date</dt><dd>{invoiceDate(order.dueDate)}</dd></div>
             <div><dt>Code</dt><dd>{order.code || '—'}</dd></div>
             <div><dt>Rep</dt><dd>{order.salesRep || '—'}</dd></div>
             <div><dt>FOB</dt><dd>{order.fob || '—'}</dd></div>

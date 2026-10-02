@@ -7,6 +7,14 @@ import { renderServiceWorker } from './service-worker.js';
 /** Files that exist in dist but are never fetched while the app is running. */
 const SKIP = new Set(['/little-bliss-cover.png', '/robots.txt', '/sw.js']);
 
+/**
+ * The Tesseract wasm cores and language model total ~9.5 MB. Precaching them
+ * would make every first visit pay for a feature most sessions never touch, so
+ * they are left to the runtime cache: fetched and stored on the first receipt
+ * scan, still served offline afterwards.
+ */
+const isOcrAsset = (url) => url.startsWith('/vendor/tesseract/');
+
 const walk = (dir) =>
   readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const full = path.join(dir, entry.name);
@@ -31,7 +39,7 @@ export function serviceWorkerPlugin() {
 
       const urls = walk(outDir)
         .map((file) => '/' + path.relative(outDir, file).split(path.sep).join('/'))
-        .filter((url) => !SKIP.has(url) && !url.endsWith('.map'))
+        .filter((url) => !SKIP.has(url) && !isOcrAsset(url) && !url.endsWith('.map'))
         .sort((a, b) => Number(b === '/index.html') - Number(a === '/index.html') || a.localeCompare(b));
 
       const digest = createHash('sha256');

@@ -4,12 +4,17 @@ import { costOfRecipe, recipeCostIssues, recipeIssueLabel, type Recipe, type Sto
 type RecipesPrintDocumentProps = {
   recipes: Recipe[];
   store: Store;
+  /** One recipe being printed on its own, rather than the whole book. */
+  single?: boolean;
 };
 
 const rp = (n: number) =>
   `E${n.toLocaleString('en-SZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-export function RecipesPrintDocument({ recipes, store }: RecipesPrintDocumentProps) {
+export function RecipesPrintDocument({ recipes, store, single = false }: RecipesPrintDocumentProps) {
+  /* A single sheet should say what it is. "Recipe Book — Total Recipes 1" reads
+     like a miscount, so one recipe is headed with its own name instead. */
+  const heading = single ? (recipes[0]?.name || 'Recipe') : 'Recipe Book';
   return (
     <article className="printable-report report-paper" aria-label="Recipes">
       <header className="report-header">
@@ -25,10 +30,10 @@ export function RecipesPrintDocument({ recipes, store }: RecipesPrintDocumentPro
         </div>
         <div className="report-meta">
           <div className="report-meta-row">
-            <span>Total Recipes</span>
+            <span>{single ? 'Recipe' : 'Total Recipes'}</span>
             <strong>{recipes.length}</strong>
           </div>
-          <div className="report-title">Recipe Book</div>
+          <div className="report-title">{heading}</div>
         </div>
       </header>
 

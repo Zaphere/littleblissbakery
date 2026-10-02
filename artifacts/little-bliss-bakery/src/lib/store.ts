@@ -9,6 +9,11 @@ export const INGREDIENT_CATEGORIES = [
   'Dry goods', 'Fats', 'Dairy', 'Fruit', 'Chocolate',
   'Raising agents', 'Spices', 'Flavourings', 'Preserves',
 ] as const;
+
+export const CLIENT_CATEGORIES = [
+  'Individual', 'Guest House', 'Hotel', 'Bakery', 'Restaurant', 'Café', 'Lodge',
+  'Office', 'Corporate', 'Retail', 'Event', 'School', 'Church/Organization', 'Other',
+] as const;
 export type RecipeIngredient = { ingredientId: string; quantity: number; unit: string; notes: string };
 export type Recipe = {
   id: string; name: string; category: string; description: string; image: string;
@@ -43,6 +48,7 @@ export type InventoryTransaction = { id: string; ingredientId: string; type: str
 export type BudgetAllocation = { id: string; name: string; mode: string; value: number };
 export type Client = { 
   id: string; name: string; address: string; city: string; phone: string; email: string; notes: string; createdAt: string; status?: string;
+  category?: string;
   // Customer insights
   totalOrders?: number;
   totalSpent?: number;
@@ -116,7 +122,8 @@ export type SalesAnalytics = {
   totalRevenue: number;
   totalOrders: number;
   averageOrderValue: number;
-  topProducts: { productId: string; productName: string; quantity: number; revenue: number }[];
+  /** Quantities are DOZENS, as entered on the order; `units` is the same figure in pieces. */
+  topProducts: { productId: string; productName: string; quantity: number; units: number; revenue: number }[];
   monthlyTrend: { month: string; revenue: number }[];
   categoryBreakdown: { category: string; revenue: number }[];
 };
@@ -292,7 +299,7 @@ export const initialStore: Store = {
   expenses: [],
   transactions: [], allocations: [{ id: 'alloc-1', name: 'Ingredients', mode: 'percent', value: 35 }, { id: 'alloc-2', name: 'Owner draw', mode: 'percent', value: 20 }, { id: 'alloc-3', name: 'Operating buffer', mode: 'fixed', value: 500 }],
   clients,
-  settings: { bakeryName: 'Little Bliss Bakery', phone: '+268 621 0474', email: 'morrelloblue@gmail.com', address: 'P.O. Box 2700, Matsapha, Eswatini', currency: 'E', theme: 'light', nextInvoiceNumber: 37, hasSeenWelcome: false },
+  settings: { bakeryName: 'Little Bliss Bakery', phone: '+268 621 0474', email: 'morrelloblue@gmail.com', address: 'P.O. Box 2700, Matsapha, Eswatini', currency: 'E', theme: 'light', nextInvoiceNumber: 42, hasSeenWelcome: false },
   auditLog: [],
   notifications: [],
   // New fields for additional features
@@ -394,17 +401,16 @@ export const loadStore = (): Store => {
       }
     }
     normalizedOrders = normalizedOrders.map((o: any) => ({ ...o, items: (o.items || []).map((it: any) => ({ ...it, productId: productIdRemap[it.productId] || it.productId })) }));
-    // costSnapshot used to hold the cost of a whole BATCH while calculateOrderCost
-    // multiplies it by a quantity in DOZENS. It must be cost per dozen. It is fully
-    // derived from the recipes (and re-derived on every save), so refreshing it on
-    // load is idempotent and corrects existing orders once the recipes load.
+    // costSnapshot is cost per individual piece. It is fully derived from the recipes
+    // and re-derived on every save, so refreshing it on load is idempotent and corrects
+    // existing orders once the recipes load.
     const ingredientSource: Ingredient[] = parsed.ingredients || initialStore.ingredients;
     normalizedOrders = normalizedOrders.map((o: any) => ({
       ...o,
       items: (o.items || []).map((it: any) => {
         const r: any = recipes.find((x: any) => x.id === it.productId);
         if (!r) return it;
-        return { ...it, costSnapshot: roundCurrency(costPerDozen(r, ingredientSource)) };
+        return { ...it, costSnapshot: roundCurrency(costPerUnit(r, ingredientSource)) };
       }),
     }));
     return {
@@ -413,7 +419,7 @@ export const loadStore = (): Store => {
       recipes,
       orders: normalizedOrders,
       clients: (() => { const savedClients = parsed.clients || []; const savedIds = new Set(savedClients.map((c: any) => c.id)); const newDefaults = initialStore.clients.filter(c => !savedIds.has(c.id)); return [...newDefaults, ...savedClients]; })(),
-      settings: { ...initialStore.settings, ...(parsed.settings || {}), nextInvoiceNumber: Math.max(Number(parsed.settings?.nextInvoiceNumber || 0), maxExisting + 1, 37) },
+      settings: { ...initialStore.settings, ...(parsed.settings || {}), nextInvoiceNumber: Math.max(Number(parsed.settings?.nextInvoiceNumber || 0), maxExisting + 1, 42) },
       auditLog: parsed.auditLog || [],
       notifications: parsed.notifications || [],
       reservations: parsed.reservations || [],
@@ -520,17 +526,22 @@ export const recipeIssueLabel = (issues: RecipeCostIssues): string =>
 export const costOfRecipe = (r: Recipe, all: Ingredient[]): number =>
   costRows(r, all).reduce((sum, line) => sum + (line.cost ?? 0), 0);
 
-/* ─── DOZENS vs PIECES ───
-   Order quantities are entered in DOZENS (unitPrice === retailPriceDozen) while
-   recipe.batchYield is in PIECES (servingSize === '1 dozen'). Every batch, cost
-   and stock formula must convert through UNITS_PER_DOZEN or it is out by 12x. */
+/* ─── PIECES MODEL ───
+   Order quantities are individual pieces. unitPrice is the price for one piece
+   (retailPriceDozen / 12). batchYield is the number of pieces one batch produces.
+   UNITS_PER_DOZEN is kept for the recipe pricing fields (retailPriceDozen /
+   wholesalePriceDozen) and analytics "dozens" display only. */
 export const UNITS_PER_DOZEN = 12;
-export const unitsFor = (quantityInDozens: number): number => Number(quantityInDozens || 0) * UNITS_PER_DOZEN;
-export const batchesFor = (quantityInDozens: number, batchYield: number): number =>
-  Math.ceil(unitsFor(quantityInDozens) / Math.max(1, Number(batchYield || 1)));
-/** Cost to produce one sellable dozen (cost of a batch spread over its pieces). */
+/** Convert a piece quantity to the equivalent number of dozens (display only). */
+export const unitsFor = (quantityInPieces: number): number => Number(quantityInPieces || 0);
+export const batchesFor = (quantityInPieces: number, batchYield: number): number =>
+  Math.ceil(Number(quantityInPieces || 0) / Math.max(1, Number(batchYield || 1)));
+/** Cost to produce one sellable dozen (used for recipe profitability reporting). */
 export const costPerDozen = (r: Recipe, all: Ingredient[]): number =>
   (costOfRecipe(r, all) / Math.max(1, Number(r.batchYield || 1))) * UNITS_PER_DOZEN;
+/** Cost to produce one individual piece (used for order item costSnapshot). */
+export const costPerUnit = (r: Recipe, all: Ingredient[]): number =>
+  costOfRecipe(r, all) / Math.max(1, Number(r.batchYield || 1));
 
 export const batchPlanForOrder = (order: Order, recipes: Recipe[]): BatchPlanLine[] => {
   const plan: BatchPlanLine[] = [];
@@ -809,10 +820,41 @@ export const calculateOrderTotal = (items: OrderItem[], discount: number, delive
 export const calculateOrderCost = (items: OrderItem[]): number =>
   roundCurrency(items.reduce((sum, item) => sum + item.quantity * item.costSnapshot, 0));
 
+/* ─── REVENUE BASIS ───
+   Three different revenue figures were in circulation: line value minus discount
+   (Overview, Reports), the full invoice total including delivery and tax
+   (Financial Reports, Sales Analytics) and sum of items ignoring the discount.
+   Every reporting page now reads NET SALES from here: what the bakery earned for
+   product, after the discount it agreed, before the delivery and tax it merely
+   collected on someone else's behalf. Delivery and tax stay visible on the
+   invoice and in their own order lines — they are not product revenue, and the
+   cost/margin model is built on product revenue. */
+export const calculateOrderRevenue = (items: OrderItem[], discount: number): number =>
+  roundCurrency(calculateOrderSubtotal(items) - discount);
+
+export const orderRevenue = (order: Order): number => calculateOrderRevenue(order.items, order.discount);
+
 export const calculateOrderOutstanding = (items: OrderItem[], discount: number, deliveryFee: number, taxRate: number, amountPaid: number): number =>
   Math.max(0, roundCurrency(calculateOrderTotal(items, discount, deliveryFee, taxRate) - amountPaid));
 
 // ─── Revenue period filtering ───
+/** YYYY-MM-DD for a Date, read in LOCAL time. */
+export const localDateKey = (date: Date): string =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
+/**
+ * Parse a stored YYYY-MM-DD as a LOCAL date. new Date('2026-09-30') is UTC
+ * midnight, which is the previous day in every timezone behind UTC — enough to
+ * move a sale into the wrong month and a bake into the wrong day.
+ */
+export const parseLocalDate = (value: string | null | undefined): Date => {
+  const parts = String(value ?? '').slice(0, 10).split('-').map(Number);
+  return new Date(parts[0] || 1970, (parts[1] || 1) - 1, parts[2] || 1);
+};
+
+/** The last day of a month, safe for December (month 12 + 1 rolls over on its own). */
+export const monthKey = (date: Date): string => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+
 export type RevenuePeriod = 'today' | '2days' | 'week' | 'month' | 'year' | 'lifetime';
 export const REVENUE_PERIODS: { value: RevenuePeriod; label: string }[] = [
   { value: 'today', label: 'Today' },
@@ -828,8 +870,7 @@ export const revenuePeriodLabel = (period: string): string =>
 export const inRevenuePeriod = (dateStr: string, period: RevenuePeriod): boolean => {
   // Parse YYYY-MM-DD as a LOCAL date — new Date('YYYY-MM-DD') is UTC midnight and
   // shifts a whole day in timezones behind UTC.
-  const parts = dateStr.slice(0, 10).split('-').map(Number);
-  const d = new Date(parts[0], (parts[1] || 1) - 1, parts[2] || 1);
+  const d = parseLocalDate(dateStr);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   if (period === 'today') return d.getTime() === today.getTime();
@@ -870,88 +911,530 @@ export const createNotification = (title: string, body: string, section: string,
 export const unreadCount = (notifications: Notification[]) => notifications.filter(n => !n.read).length;
 
 // Sales Analytics Functions
+/* Reads the shared report helpers rather than re-deriving them, so this page and
+   the Reports page can never quote different revenue for the same orders. The
+   12-month trend is deliberately period-independent: it is the trend's own
+   context, not a total of the selected period. */
 export const calculateSalesAnalytics = (orders: Order[], recipes: Recipe[], period: string = 'month'): SalesAnalytics => {
-  const now = new Date();
-  const currentMonth = now.getMonth();
-  const currentYear = now.getFullYear();
-
   const rp: RevenuePeriod = period === 'all' ? 'lifetime' : (period as RevenuePeriod);
   const filteredOrders = revenueOrders(orders, rp);
-  const countedOrders = revenueOrders(orders, 'lifetime');
 
-  const totalRevenue = filteredOrders.reduce((sum, o) => sum + calculateOrderTotal(o.items, o.discount, o.deliveryFee, o.taxRate || 0), 0);
-  const totalOrders = filteredOrders.length;
-  const averageOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
+  const totals = periodTotals(filteredOrders);
 
-  // Top products
-  const productSales = new Map<string, { productName: string; quantity: number; revenue: number }>();
-  filteredOrders.forEach(order => {
-    order.items.forEach(item => {
-      const recipe = recipes.find(r => r.id === item.productId);
-      const productName = recipe?.name || 'Unknown';
-      const existing = productSales.get(item.productId) || { productName, quantity: 0, revenue: 0 };
-      existing.quantity += item.quantity;
-      existing.revenue += item.quantity * item.unitPrice;
-      productSales.set(item.productId, existing);
-    });
-  });
-  const topProducts = Array.from(productSales.entries())
-    .map(([productId, data]) => ({ productId, ...data }))
-    .sort((a, b) => b.revenue - a.revenue)
-    .slice(0, 10);
+  const topProducts = salesByProduct(filteredOrders, recipes)
+    .slice(0, 10)
+    .map(line => ({ productId: line.productId, productName: line.productName, quantity: line.dozens, units: line.units, revenue: line.revenue }));
 
-  // Monthly trend
-  const monthlyTrend: { month: string; revenue: number }[] = [];
-  for (let i = 11; i >= 0; i--) {
-    const d = new Date(currentYear, currentMonth - i, 1);
-    const monthStr = d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
-    const monthOrders = countedOrders.filter(o => {
-      const od = new Date(o.orderDate);
-      return od.getMonth() === d.getMonth() && od.getFullYear() === d.getFullYear();
-    });
-    const revenue = monthOrders.reduce((sum, o) => sum + calculateOrderTotal(o.items, o.discount, o.deliveryFee, o.taxRate || 0), 0);
-    monthlyTrend.push({ month: monthStr, revenue });
-  }
+  // Lifetime sales, bucketed into the last 12 calendar months.
+  const monthlyTrend = reportMonthlyTrend(revenueOrders(orders, 'lifetime'), [], 12)
+    .map(point => ({ month: point.label, revenue: point.revenue }));
 
-  // Category breakdown
-  const categoryBreakdown = new Map<string, number>();
-  filteredOrders.forEach(order => {
-    order.items.forEach(item => {
-      const recipe = recipes.find(r => r.id === item.productId);
-      if (recipe) {
-        const existing = categoryBreakdown.get(recipe.category) || 0;
-        categoryBreakdown.set(recipe.category, existing + (item.quantity * item.unitPrice));
-      }
-    });
-  });
+  const categoryBreakdown = salesByCategory(filteredOrders, recipes)
+    .map(line => ({ category: line.category, revenue: line.revenue }));
 
   return {
     period,
-    totalRevenue,
-    totalOrders,
-    averageOrderValue,
+    totalRevenue: totals.revenue,
+    totalOrders: totals.orders,
+    averageOrderValue: totals.averageOrderValue,
     topProducts,
     monthlyTrend,
-    categoryBreakdown: Array.from(categoryBreakdown.entries()).map(([category, revenue]) => ({ category, revenue })),
+    categoryBreakdown,
   };
 };
 
+/* ─── REPORT CALCULATIONS ───
+   One place for every figure a report shows. Reports, Sales Analytics and
+   Financial Reports all read from here, so a number can never quietly disagree
+   with itself between two screens. Nothing here invents data: each helper only
+   reshapes what is already in the store, and each returns an empty result when
+   there is nothing to reshape. */
+export type PeriodTotals = {
+  orders: number;
+  revenue: number;
+  costs: number;
+  grossProfit: number;
+  /** Null — not zero — when there is no revenue to take a margin of. */
+  grossMargin: number | null;
+  expenses: number;
+  profit: number;
+  profitMargin: number | null;
+  received: number;
+  outstanding: number;
+  dozensSold: number;
+  unitsSold: number;
+  averageOrderValue: number;
+};
+
+const marginOf = (part: number, whole: number): number | null => (whole > 0 ? (part / whole) * 100 : null);
+
+export const periodTotals = (orders: Order[], expenses: Expense[] = []): PeriodTotals => {
+  const revenue = roundCurrency(orders.reduce((sum, o) => sum + orderRevenue(o), 0));
+  const costs = roundCurrency(orders.reduce((sum, o) => sum + calculateOrderCost(o.items), 0));
+  const expensesTotal = roundCurrency(expenses.reduce((sum, e) => sum + e.amount, 0));
+  const received = roundCurrency(orders.reduce((sum, o) => sum + (o.amountPaid || 0), 0));
+  const dozensSold = roundCurrency(orders.reduce((sum, o) => sum + o.items.reduce((a, i) => a + i.quantity, 0), 0));
+  const grossProfit = roundCurrency(revenue - costs);
+  const profit = roundCurrency(grossProfit - expensesTotal);
+  return {
+    orders: orders.length,
+    revenue,
+    costs,
+    grossProfit,
+    grossMargin: marginOf(grossProfit, revenue),
+    expenses: expensesTotal,
+    profit,
+    profitMargin: marginOf(profit, revenue),
+    received,
+    outstanding: roundCurrency(Math.max(0, revenue - received)),
+    dozensSold,
+    unitsSold: unitsFor(dozensSold),
+    averageOrderValue: orders.length ? roundCurrency(revenue / orders.length) : 0,
+  };
+};
+
+/** The reporting period's own orders and expenses, under the store's revenue rules. */
+export const periodScope = (store: Pick<Store, 'orders' | 'expenses'>, period: RevenuePeriod) => {
+  const orders = revenueOrders(store.orders, period);
+  const expenses = store.expenses.filter(e => inRevenuePeriod(e.date, period));
+  return { orders, expenses, totals: periodTotals(orders, expenses) };
+};
+
+export type ProductSalesLine = {
+  productId: string;
+  productName: string;
+  category: string;
+  orders: number;
+  dozens: number;
+  units: number;
+  revenue: number;
+  cost: number;
+  profit: number;
+  /** Null when nothing was sold in the period — there is no margin to quote. */
+  margin: number | null;
+};
+
+/** Sales by product, best first. Quantities are dozens, as entered on the order. */
+export const salesByProduct = (orders: Order[], recipes: Recipe[]): ProductSalesLine[] => {
+  const lines = new Map<string, ProductSalesLine & { orderIds: Set<string> }>();
+  orders.forEach(order => {
+    order.items.forEach(item => {
+      const recipe = recipes.find(r => r.id === item.productId);
+      const existing = lines.get(item.productId) || {
+        productId: item.productId,
+        productName: recipe?.name || 'Unknown product',
+        category: recipe?.category || 'Uncategorised',
+        orders: 0, dozens: 0, units: 0, revenue: 0, cost: 0, profit: 0, margin: null,
+        orderIds: new Set<string>(),
+      };
+      existing.dozens += (item.quantity || 0) / UNITS_PER_DOZEN;
+      existing.units += item.quantity || 0;
+      existing.revenue = roundCurrency(existing.revenue + item.quantity * item.unitPrice);
+      existing.cost = roundCurrency(existing.cost + item.quantity * (item.costSnapshot || 0));
+      existing.orderIds.add(order.id);
+      lines.set(item.productId, existing);
+    });
+  });
+  return [...lines.values()]
+    .map(({ orderIds, ...line }) => ({
+      ...line,
+      orders: orderIds.size,
+      profit: roundCurrency(line.revenue - line.cost),
+      margin: marginOf(roundCurrency(line.revenue - line.cost), line.revenue),
+    }))
+    .sort((a, b) => b.revenue - a.revenue);
+};
+
+export type CategorySalesLine = { category: string; revenue: number; dozens: number; products: number };
+
+export const salesByCategory = (orders: Order[], recipes: Recipe[]): CategorySalesLine[] => {
+  const lines = new Map<string, CategorySalesLine & { productIds: Set<string> }>();
+  orders.forEach(order => {
+    order.items.forEach(item => {
+      const recipe = recipes.find(r => r.id === item.productId);
+      if (!recipe) return;
+      const existing = lines.get(recipe.category) || { category: recipe.category, revenue: 0, dozens: 0, products: 0, productIds: new Set<string>() };
+      existing.dozens += (item.quantity || 0) / UNITS_PER_DOZEN;
+      existing.revenue = roundCurrency(existing.revenue + item.quantity * item.unitPrice);
+      existing.productIds.add(item.productId);
+      lines.set(recipe.category, existing);
+    });
+  });
+  return [...lines.values()]
+    .map(({ productIds, ...line }) => ({ ...line, products: productIds.size }))
+    .sort((a, b) => b.revenue - a.revenue);
+};
+
+export type ClientSalesLine = {
+  customerName: string;
+  orders: number;
+  revenue: number;
+  averageOrderValue: number;
+  firstOrderDate: string;
+  lastOrderDate: string;
+};
+
+export const salesByClient = (orders: Order[]): ClientSalesLine[] => {
+  const lines = new Map<string, ClientSalesLine>();
+  orders.forEach(order => {
+    const key = order.customerName || 'Unnamed customer';
+    const existing = lines.get(key) || {
+      customerName: key, orders: 0, revenue: 0, averageOrderValue: 0,
+      firstOrderDate: order.orderDate, lastOrderDate: order.orderDate,
+    };
+    existing.orders += 1;
+    existing.revenue = roundCurrency(existing.revenue + orderRevenue(order));
+    if (order.orderDate < existing.firstOrderDate) existing.firstOrderDate = order.orderDate;
+    if (order.orderDate > existing.lastOrderDate) existing.lastOrderDate = order.orderDate;
+    lines.set(key, existing);
+  });
+  return [...lines.values()]
+    .map(line => ({ ...line, averageOrderValue: roundCurrency(line.orders ? line.revenue / line.orders : 0) }))
+    .sort((a, b) => b.revenue - a.revenue);
+};
+
+export type TrendPoint = {
+  key: string;
+  label: string;
+  revenue: number;
+  costs: number;
+  expenses: number;
+  profit: number;
+  received: number;
+  orders: number;
+};
+
+/** Net sales and order count for the last `months` calendar months, oldest first. */
+export const reportMonthlyTrend = (orders: Order[], expenses: Expense[], months: number = 12): TrendPoint[] => {
+  const now = new Date();
+  const buckets: TrendPoint[] = [];
+  for (let i = months - 1; i >= 0; i--) {
+    const anchor = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const key = monthKey(anchor);
+    const label = anchor.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+    buckets.push({ key, label, revenue: 0, costs: 0, expenses: 0, profit: 0, received: 0, orders: 0 });
+  }
+  const byMonth = new Map(buckets.map(b => [b.key, b]));
+  const revenueOrdersOnly = revenueOrders(orders, 'lifetime');
+  revenueOrdersOnly.forEach(order => {
+    const bucket = byMonth.get(monthKey(parseLocalDate(order.orderDate)));
+    if (!bucket) return;
+    bucket.revenue = roundCurrency(bucket.revenue + orderRevenue(order));
+    bucket.costs = roundCurrency(bucket.costs + calculateOrderCost(order.items));
+    bucket.received = roundCurrency(bucket.received + (order.amountPaid || 0));
+    bucket.orders += 1;
+  });
+  expenses.forEach(expense => {
+    const bucket = byMonth.get(monthKey(parseLocalDate(expense.date)));
+    if (!bucket) return;
+    bucket.expenses = roundCurrency(bucket.expenses + expense.amount);
+  });
+  return buckets.map(b => ({ ...b, profit: roundCurrency(b.revenue - b.costs - b.expenses) }));
+};
+
+/** Net sales and order count for the last `days` days, oldest first. */
+export const dailyTrend = (orders: Order[], expenses: Expense[], days: number = 30): TrendPoint[] => {
+  const buckets: TrendPoint[] = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const anchor = new Date();
+    anchor.setHours(0, 0, 0, 0);
+    anchor.setDate(anchor.getDate() - i);
+    const key = localDateKey(anchor);
+    buckets.push({ key, label: anchor.toLocaleDateString('en-SZ', { day: '2-digit', month: 'short' }), revenue: 0, costs: 0, expenses: 0, profit: 0, received: 0, orders: 0 });
+  }
+  const byDay = new Map(buckets.map(b => [b.key, b]));
+  revenueOrders(orders, 'lifetime').forEach(order => {
+    const bucket = byDay.get(localDateKey(parseLocalDate(order.orderDate)));
+    if (!bucket) return;
+    bucket.revenue = roundCurrency(bucket.revenue + orderRevenue(order));
+    bucket.costs = roundCurrency(bucket.costs + calculateOrderCost(order.items));
+    bucket.received = roundCurrency(bucket.received + (order.amountPaid || 0));
+    bucket.orders += 1;
+  });
+  expenses.forEach(expense => {
+    const bucket = byDay.get(localDateKey(parseLocalDate(expense.date)));
+    if (!bucket) return;
+    bucket.expenses = roundCurrency(bucket.expenses + expense.amount);
+  });
+  return buckets.map(b => ({ ...b, profit: roundCurrency(b.revenue - b.costs - b.expenses) }));
+};
+
+/**
+ * A trend whose granularity matches the period the reader chose: days for a week
+ * or less, months for anything longer. Short periods on a monthly axis either
+ * collapse into a single bar or hide every sale.
+ */
+export const trendForPeriod = (orders: Order[], expenses: Expense[], period: RevenuePeriod): TrendPoint[] => {
+  if (period === 'today' || period === '2days') return dailyTrend(orders, expenses, 14);
+  if (period === 'week') return dailyTrend(orders, expenses, 30);
+  if (period === 'year' || period === 'lifetime') return reportMonthlyTrend(orders, expenses, 12);
+  return dailyTrend(orders, expenses, 30);
+};
+
+/** Production demand per product: what the period's orders require the bakery to bake. */
+export type ProductionLine = {
+  recipeId: string;
+  recipeName: string;
+  category: string;
+  orders: number;
+  dozens: number;
+  units: number;
+  batches: number;
+  revenue: number;
+  lastDueDate: string;
+};
+
+export const productionByProduct = (orders: Order[], recipes: Recipe[]): ProductionLine[] => {
+  const lines = new Map<string, ProductionLine & { orderIds: Set<string> }>();
+  orders.forEach(order => {
+    order.items.forEach(item => {
+      const recipe = recipes.find(r => r.id === item.productId);
+      if (!recipe) return;
+      const existing = lines.get(item.productId) || {
+        recipeId: item.productId, recipeName: recipe.name, category: recipe.category,
+        orders: 0, dozens: 0, units: 0, batches: 0, revenue: 0, lastDueDate: order.dueDate, orderIds: new Set<string>(),
+      };
+      existing.dozens += (item.quantity || 0) / UNITS_PER_DOZEN;
+      existing.units += item.quantity || 0;
+      existing.batches += batchesFor(item.quantity, recipe.batchYield);
+      existing.revenue = roundCurrency(existing.revenue + item.quantity * item.unitPrice);
+      if (order.dueDate > existing.lastDueDate) existing.lastDueDate = order.dueDate;
+      existing.orderIds.add(order.id);
+      lines.set(item.productId, existing);
+    });
+  });
+  return [...lines.values()]
+    .map(({ orderIds, ...line }) => ({ ...line, orders: orderIds.size }))
+    .sort((a, b) => b.units - a.units);
+};
+
+export type CustomerReport = {
+  clientsOnFile: number;
+  newInPeriod: number;
+  activeInPeriod: number;
+  repeatInPeriod: number;
+  oneTimeInPeriod: number;
+  repeatRate: number | null;
+  lifetimeRevenue: number;
+  periodRevenue: number;
+  clients: (ClientSalesLine & { lifetimeOrders: number; newInPeriod: boolean; repeat: boolean })[];
+};
+
+/** Client activity, split by what the period's orders say and by the client file itself. */
+export const customerReport = (orders: Order[], clientFile: Client[], period: RevenuePeriod): CustomerReport => {
+  const periodOrders = revenueOrders(orders, period);
+  const lifetime = salesByClient(revenueOrders(orders, 'lifetime'));
+  const lifetimeByName = new Map(lifetime.map(line => [line.customerName, line]));
+  const inPeriod = salesByClient(periodOrders);
+
+  const active: CustomerReport['clients'] = inPeriod.map(line => {
+    const lifetimeLine = lifetimeByName.get(line.customerName);
+    return {
+      ...line,
+      lifetimeOrders: lifetimeLine?.orders || line.orders,
+      newInPeriod: clientFile.some(c => c.name === line.customerName && inRevenuePeriod(c.createdAt, period)),
+      repeat: (lifetimeLine?.orders || line.orders) > 1,
+    };
+  });
+
+  const repeatInPeriod = active.filter(c => c.lifetimeOrders > 1).length;
+  return {
+    clientsOnFile: clientFile.length,
+    newInPeriod: clientFile.filter(c => inRevenuePeriod(c.createdAt, period)).length,
+    activeInPeriod: active.length,
+    repeatInPeriod,
+    oneTimeInPeriod: active.length - repeatInPeriod,
+    repeatRate: marginOf(repeatInPeriod, active.length),
+    lifetimeRevenue: roundCurrency(lifetime.reduce((sum, l) => sum + l.revenue, 0)),
+    periodRevenue: roundCurrency(active.reduce((sum, c) => sum + c.revenue, 0)),
+    clients: active,
+  };
+};
+
+export type StockStatus = 'out' | 'low' | 'watch' | 'ok';
+
+export type StockReportLine = {
+  ingredientId: string;
+  name: string;
+  category: string;
+  supplier: string;
+  unit: string;
+  currentStock: number;
+  minimumStock: number;
+  /** Stock value at the ingredient's own unit cost. Zero when it has no price. */
+  value: number;
+  status: StockStatus;
+  /** Current stock as a share of the minimum; null when no minimum is set. */
+  ratioToMinimum: number | null;
+};
+
+/** Read-only view of the pantry. Reports it; never adjusts, never reorders. */
+export const stockReport = (ingredients: Ingredient[]): StockReportLine[] => {
+  const severity: Record<StockStatus, number> = { out: 0, low: 1, watch: 2, ok: 3 };
+  return ingredients.map(i => {
+    const cost = unitCost(i);
+    const ratio = i.minimumStock > 0 ? i.currentStock / i.minimumStock : null;
+    const status: StockStatus = i.currentStock <= 0 ? 'out'
+      : i.minimumStock <= 0 ? 'ok'
+      : i.currentStock <= i.minimumStock ? 'low'
+      : i.currentStock <= i.minimumStock * 1.5 ? 'watch'
+      : 'ok';
+    return {
+      ingredientId: i.id, name: i.name, category: i.category, supplier: i.supplier, unit: i.unit,
+      currentStock: i.currentStock, minimumStock: i.minimumStock,
+      value: roundCurrency((cost || 0) * i.currentStock),
+      status, ratioToMinimum: ratio,
+    };
+  }).sort((a, b) => severity[a.status] - severity[b.status]
+    || (a.ratioToMinimum ?? Infinity) - (b.ratioToMinimum ?? Infinity)
+    || a.name.localeCompare(b.name));
+};
+
+/** Stock movements already recorded in the pantry log, filtered to the period. */
+export type MovementLine = {
+  transactionId: string;
+  ingredientId: string;
+  ingredientName: string;
+  date: string;
+  type: string;
+  quantity: number;
+  unit: string;
+  note: string;
+};
+
+export const stockMovement = (transactions: InventoryTransaction[], ingredients: Ingredient[], period: RevenuePeriod): MovementLine[] =>
+  (transactions || [])
+    .filter(t => inRevenuePeriod(t.date, period))
+    .map(t => ({
+      transactionId: t.id,
+      ingredientId: t.ingredientId,
+      ingredientName: ingredients.find(i => i.id === t.ingredientId)?.name || t.ingredientId,
+      date: t.date,
+      type: t.type,
+      quantity: t.quantity || 0,
+      unit: ingredients.find(i => i.id === t.ingredientId)?.unit || '',
+      note: t.note || '',
+    }))
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+
+/** What the period's orders will consume of each ingredient, in the ingredient's own unit. */
+export type IngredientUsageLine = {
+  ingredientId: string;
+  ingredientName: string;
+  category: string;
+  unit: string;
+  quantity: number;
+  cost: number;
+  recipes: string[];
+};
+
+export const ingredientConsumption = (orders: Order[], recipes: Recipe[], ingredients: Ingredient[]): IngredientUsageLine[] => {
+  const usage = ingredientUsageForOrders(orders, recipes, ingredients);
+  const rows: IngredientUsageLine[] = [];
+  Object.entries(usage).forEach(([ingredientId, quantity]) => {
+    const ingredient = ingredients.find(i => i.id === ingredientId);
+    if (!ingredient) return;
+    const cost = unitCost(ingredient);
+    rows.push({
+      ingredientId,
+      ingredientName: ingredient.name,
+      category: ingredient.category,
+      unit: ingredient.unit,
+      quantity: roundCurrency(quantity),
+      cost: roundCurrency((cost || 0) * quantity),
+      recipes: recipes.filter(r => r.ingredients.some(row => row.ingredientId === ingredientId)).map(r => r.name),
+    });
+  });
+  return rows.sort((a, b) => b.quantity - a.quantity);
+};
+
+export type ExpenseCategoryLine = { category: string; amount: number; share: number | null; count: number };
+
+export const expenseBreakdown = (expenses: Expense[]): ExpenseCategoryLine[] => {
+  const total = roundCurrency(expenses.reduce((sum, e) => sum + e.amount, 0));
+  const lines = new Map<string, ExpenseCategoryLine>();
+  expenses.forEach(e => {
+    const existing = lines.get(e.category || 'Uncategorised') || { category: e.category || 'Uncategorised', amount: 0, share: null, count: 0 };
+    existing.amount = roundCurrency(existing.amount + e.amount);
+    existing.count += 1;
+    lines.set(e.category || 'Uncategorised', existing);
+  });
+  return [...lines.values()]
+    .map(line => ({ ...line, share: marginOf(line.amount, total) }))
+    .sort((a, b) => b.amount - a.amount);
+};
+
+export type RecipeProfitability = {
+  recipe: Recipe;
+  /** Ingredient cost of one dozen, on the app's existing costPerDozen definition. */
+  costPerDozen: number;
+  revenue: number;
+  profit: number;
+  /** Null when the product has no selling price yet — a loss, not a 0% margin. */
+  margin: number | null;
+  issues: RecipeCostIssues;
+  /** False when a row could not be costed, so the cost is a floor, not the truth. */
+  costComplete: boolean;
+};
+
+/**
+ * The app's one margin formula, used by the Profit Margin page, the Reports
+ * profitability panel and the calculator so the three can never disagree.
+ * Null — not zero — when there is no revenue to take a margin of: a product with
+ * no selling price is a loss, and printing 0.0% for it hides that.
+ */
+export const marginFor = (revenue: number, cost: number): number | null => {
+  const selling = Number(revenue) || 0;
+  return selling > 0 ? ((selling - (Number(cost) || 0)) / selling) * 100 : null;
+};
+
+/**
+ * The single profitability definition used by Reports, the Profit Margin page and
+ * the printed documents: revenue is the selling price of a dozen, cost is
+ * costPerDozen, profit is the difference and margin is profit over revenue.
+ * Labor, energy and packaging are deliberately excluded — they are zero
+ * everywhere in this app and no cost formula has ever included them.
+ */
+export const recipeProfitability = (recipe: Recipe, ingredients: Ingredient[]): RecipeProfitability => {
+  const revenue = Number(recipe.retailPriceDozen || 0);
+  const costPerDozenValue = costPerDozen(recipe, ingredients);
+  const issues = recipeCostIssues(recipe, ingredients);
+  const profit = roundCurrency(revenue - costPerDozenValue);
+  return {
+    recipe,
+    costPerDozen: costPerDozenValue,
+    revenue,
+    profit,
+    margin: marginFor(revenue, costPerDozenValue),
+    issues,
+    costComplete: issues.count === 0,
+  };
+};
+
+export const allRecipeProfitability = (recipes: Recipe[], ingredients: Ingredient[]): RecipeProfitability[] =>
+  recipes.map(r => recipeProfitability(r, ingredients));
+
 // Production Schedule Functions
+/* Production is derived live from the orders already in the store — nothing is
+   written back, so placing an order needs no calendar step of its own. Two date
+   bugs used to hide today's bake: new Date('YYYY-MM-DD') is UTC midnight (a
+   different local day west of Greenwich), and daysUntilDue > 0 dropped an order
+   due today altogether. */
 export const generateProductionSchedule = (orders: Order[], recipes: Recipe[]): ProductionSchedule[] => {
   const schedules: ProductionSchedule[] = [];
-  const today = new Date();
-  
+  const today = parseLocalDate(localDateKey(new Date()));
+
   orders.filter(o => o.paymentStatus !== 'Paid' && !o.archived).forEach(order => {
-    const dueDate = new Date(order.dueDate);
-    const daysUntilDue = Math.ceil((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-    
-    if (daysUntilDue > 0 && daysUntilDue <= 7) {
+    const dueDate = parseLocalDate(order.dueDate);
+    const daysUntilDue = Math.round((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+    if (daysUntilDue >= 0 && daysUntilDue <= 7) {
       order.items.forEach(item => {
         const recipe = recipes.find(r => r.id === item.productId);
         if (recipe) {
           schedules.push({
-            id: `sched-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-            date: dueDate.toISOString().slice(0, 10),
+            id: `sched-${order.id}-${item.productId}`,
+            date: localDateKey(dueDate),
             recipeId: recipe.id,
             recipeName: recipe.name,
             quantity: item.quantity,
@@ -963,7 +1446,7 @@ export const generateProductionSchedule = (orders: Order[], recipes: Recipe[]): 
     }
   });
 
-  return schedules.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  return schedules.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.recipeName.localeCompare(b.recipeName));
 };
 
 // Automatic Reordering Functions
@@ -1108,7 +1591,7 @@ export const getRecipeProfitability = (recipes: Recipe[], ingredients: Ingredien
         return sum + (item ? item.quantity : 0);
       }, 0);
 
-    const totalCost = totalQuantity > 0 ? (cost / recipe.batchYield) * unitsFor(totalQuantity) : 0;
+    const totalCost = totalQuantity > 0 ? (cost / Math.max(1, recipe.batchYield)) * totalQuantity : 0;
     const profit = totalRevenue - totalCost;
     const profitMargin = totalRevenue > 0 ? (profit / totalRevenue) * 100 : 0;
 

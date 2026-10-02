@@ -4,7 +4,7 @@ import { Route, Switch, Link, useLocation, useSearch } from 'wouter';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Archive, ArrowDownRight, ArrowUpRight, Banknote, BarChart3, BookOpen, Box, CalendarDays, Check, ChevronRight, ClipboardList,
-  CircleAlert, CircleDollarSign, Download, Eye, EyeOff, FileText, Grape, LayoutDashboard, Map as MapIcon, Menu, Package,
+  CircleAlert, CircleDollarSign, Download, Eye, EyeOff, FileText, Grape, LayoutDashboard, Map as MapIcon, Menu, Package, ScanLine,
   Pencil, Pin, Plus, Receipt, RefreshCw, Search, Settings as SettingsIcon, Sparkles,
   Trash2, TrendingUp, Upload, Wallet, X, SlidersHorizontal,
   Bell, History, Home, MoreHorizontal, ChevronLeft, ChevronDown, Clock, Edit3, Users, Flame, Lock
@@ -18,7 +18,12 @@ import { BakingReferencePrintDocument } from '@/components/baking-reference-prin
 import { KitchenOrderFormDocument } from '@/components/kitchen-order-form-document';
 import { ShoppingListDocument } from '@/components/shopping-list-document';
 import { StockCheckSheetDocument } from '@/components/stock-check-sheet-document';
-import { formatInvoiceNumber, getNextInvoiceNumber, loadStore, saveStore, resetStore, unitCost, costOfRecipe, costOfRow, recipeCostIssues, recipeIssueLabel, convertQty, UNIT_OPTIONS, costPerDozen, unitsFor, UNITS_PER_DOZEN, ingredientUsageForOrder, ingredientUsageForOrders, projectedStock, doughLeftover, today, createAuditEntry, createNotification, unreadCount, calculateOrderTotal, calculateOrderCost, calculateOrderOutstanding, roundCurrency, INGREDIENT_CATEGORIES, getCustomerAnalytics, type Store, type Ingredient, type Recipe, type Order, type Expense, type InventoryTransaction, type BudgetAllocation, type AuditLogEntry, type Notification, type Client, type RecipeVersion, type StaffTask, type DeliveryRoute, type WhatsAppMessage, type BackupRecord, type OrderItem, calculateSalesAnalytics, generateProductionSchedule, generatePurchaseOrders, upsertReservation, releaseReservations, issueReservation, reservationForOrder, reservationValue, reservedQuantityByIngredient, availableStock, preBakePlan, reservedBatchCount, issuedBatchCount, type MaterialReservation, type ReservationStatus, type PreBakePlan, REVENUE_PERIODS, revenueOrders, inRevenuePeriod, revenuePeriodLabel, type RevenuePeriod } from '@/lib/store';
+import { ReportDocument, type ReportKpi, type ReportSection } from '@/components/report-document';
+import { PurchaseOrderDocument } from '@/components/purchase-order-document';
+import { BarReportChart, ChartCard, DonutReportChart, GroupedBarReportChart, TrendReportChart, type ChartDatum } from '@/components/report-charts';
+import { ReceiptScanModal } from '@/components/receipt-scan-modal';
+import { SyncPanel } from '@/components/sync-panel';
+import { formatInvoiceNumber, getNextInvoiceNumber, loadStore, saveStore, resetStore, unitCost, costOfRecipe, costOfRow, recipeCostIssues, recipeIssueLabel, convertQty, UNIT_OPTIONS, costPerDozen, costPerUnit, unitsFor, UNITS_PER_DOZEN, ingredientUsageForOrder, ingredientUsageForOrders, projectedStock, doughLeftover, today, createAuditEntry, createNotification, unreadCount, calculateOrderTotal, calculateOrderCost, calculateOrderOutstanding, roundCurrency, INGREDIENT_CATEGORIES, CLIENT_CATEGORIES, getCustomerAnalytics, type Store, type Ingredient, type Recipe, type Order, type Expense, type InventoryTransaction, type BudgetAllocation, type AuditLogEntry, type Notification, type Client, type RecipeVersion, type StaffTask, type DeliveryRoute, type WhatsAppMessage, type BackupRecord, type OrderItem, calculateSalesAnalytics, generateProductionSchedule, generatePurchaseOrders, upsertReservation, releaseReservations, issueReservation, reservationForOrder, reservationValue, reservedQuantityByIngredient, availableStock, preBakePlan, reservedBatchCount, issuedBatchCount, type MaterialReservation, type ReservationStatus, type PreBakePlan, REVENUE_PERIODS, revenueOrders, inRevenuePeriod, revenuePeriodLabel, type RevenuePeriod, orderRevenue, marginFor, recipeProfitability, allRecipeProfitability, type RecipeProfitability, periodScope, periodTotals, type PeriodTotals, salesByProduct, salesByCategory, salesByClient, type ProductSalesLine, type CategorySalesLine, type ClientSalesLine, trendForPeriod, reportMonthlyTrend, type TrendPoint, productionByProduct, type ProductionLine, customerReport, type CustomerReport, stockReport, type StockReportLine, stockMovement, type MovementLine, ingredientConsumption, type IngredientUsageLine, expenseBreakdown, type ExpenseCategoryLine, localDateKey, parseLocalDate } from '@/lib/store';
 import { parseExcelFile, buildImportData, type ParsedInvoice, type ImportResult } from '@/lib/excel-import';
 import { useIsMobile } from '@/hooks/use-mobile';
 import '@/index.css';
@@ -27,7 +32,43 @@ const StoreContext = createContext<{ store: Store; update: (patch: Partial<Store
 const useStore = () => useContext(StoreContext);
 const money = (n: number) => `E${n.toLocaleString('en-SZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const shortDate = (s: string) => new Date(`${s}T00:00:00`).toLocaleDateString('en-SZ', { day: '2-digit', month: 'short' });
+const changedPrice = (prev: Ingredient | undefined, next: Ingredient): string => {
+  if (!prev || !prev.purchasePrice || !next.purchasePrice || prev.purchasePrice === next.purchasePrice) return '';
+  const pct = Math.round(((next.purchasePrice - prev.purchasePrice) / prev.purchasePrice) * 100);
+  return ` — price ${money(prev.purchasePrice)} → ${money(next.purchasePrice)} (${pct > 0 ? '+' : ''}${pct}%)`;
+};
 const id = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+const DEFAULT_PRICES: Record<string, { wholesale: number; retail: number }> = {
+  'oatmeal': { wholesale: 150, retail: 180 },
+  'oat & raisin': { wholesale: 150, retail: 180 },
+  'oat raisin': { wholesale: 150, retail: 180 },
+  'oatmeal raisin': { wholesale: 150, retail: 180 },
+  'choc-chip': { wholesale: 150, retail: 180 },
+  'chocolate chip': { wholesale: 150, retail: 180 },
+  'choc chip': { wholesale: 150, retail: 180 },
+  'oatmeal pies': { wholesale: 240, retail: 270 },
+  'oatmeal pie': { wholesale: 240, retail: 270 },
+  'oat pies': { wholesale: 240, retail: 270 },
+  'chocolate brownies': { wholesale: 240, retail: 270 },
+  'brownies': { wholesale: 240, retail: 270 },
+  'strawberry jam tarts': { wholesale: 150, retail: 180 },
+  'jam tarts': { wholesale: 150, retail: 180 },
+  'strawberry tarts': { wholesale: 150, retail: 180 },
+  'dark chocolate chip': { wholesale: 180, retail: 210 },
+  'dark choc': { wholesale: 180, retail: 210 },
+  'dark chocolate': { wholesale: 180, retail: 210 },
+};
+
+const getDefaultPrices = (name: string): { wholesale: number; retail: number } => {
+  const lowerName = name.toLowerCase();
+  for (const [key, prices] of Object.entries(DEFAULT_PRICES)) {
+    if (lowerName.includes(key)) {
+      return prices;
+    }
+  }
+  return { wholesale: 0, retail: 0 };
+};
 
 /* Dashboard quick actions deep-link with ?new=1 / ?invoice=<id>. wouter's
    useLocation() only yields the pathname, so the query is read through
@@ -41,6 +82,66 @@ const clearSearchParam = (key: string) => {
   window.history.replaceState(window.history.state, '', window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash);
 };
 const cx = (...v: (string | false | undefined)[]) => v.filter(Boolean).join(' ');
+
+/* ─── REPORT EXPORTS & PRINT ───
+   Reports have three output shapes, and all three share this block:
+     CSV   a file the manager opens in a spreadsheet,
+     PDF   a purpose-built A4 document rendered by the print pipeline,
+     Screen the charts and tables below.
+   The PDF goes through printWithTitle() rather than a screenshot because that is
+   how every other document in this app prints: A4 geometry, one sheet per page,
+   and "Save as PDF" in the browser's own dialog. */
+const pct = (value: number | null | undefined) => (value === null || value === undefined || !Number.isFinite(value) ? '—' : `${value.toFixed(1)}%`);
+/** Quantities are stored in dozens; units are the baker's individual items. */
+const DOZEN = UNITS_PER_DOZEN;
+const qtyLabel = (dozens: number, unit = 'dozens') => `${dozens.toLocaleString('en-SZ', { maximumFractionDigits: 2 })} ${unit}`;
+
+const csvCell = (value: string | number) => {
+  const text = String(value ?? '');
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+};
+const toCsv = (columns: string[], rows: (string | number)[][]) =>
+  [columns, ...rows].map(row => row.map(csvCell).join(',')).join('\r\n');
+
+const downloadCsv = (filename: string, content: string) => {
+  const url = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
+/** A percentage that belongs on a chart axis, never used as a KPI stand-in. */
+const shareOf = (part: number, whole: number) => (whole > 0 ? (part / whole) * 100 : 0);
+
+/** Margin tone shared by every profitability surface so a 30% margin looks the same everywhere. */
+const marginTone = (margin: number | null) => margin === null ? 'text-muted-foreground' : margin >= 50 ? 'text-primary' : margin >= 30 ? 'text-yellow-600' : 'text-destructive';
+
+function ReportPrintPortal({ title, onClose, children, landscape }: { title: string; onClose: () => void; children: ReactNode; landscape?: boolean }) {
+  const { store } = useStore();
+  return createPortal(
+    <div className="print-portal fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={e => e.target === e.currentTarget && onClose()}>
+      <div className="mx-auto min-h-full w-full max-w-5xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6">
+        <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Report preview</p>
+            <h2 className="display text-2xl font-semibold">{title}</h2>
+            <p className="mt-1 text-xs text-muted-foreground">Choose “Save as PDF” as the destination, and turn off headers and footers for a clean sheet.</p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={onClose}>Close</Button>
+            <Button onClick={() => printWithTitle(`${store.settings.bakeryName || 'Little Bliss Bakery'} — ${title}`, { landscape })}>
+              <Download size={16} /> Print / save PDF
+            </Button>
+          </div>
+        </div>
+        {children}
+      </div>
+    </div>,
+    document.body,
+  );
+}
 
 function parseOrderText(text: string, recipes: Recipe[]): { customerName: string; items: { productId: string; quantity: number; unitPrice: number; costSnapshot: number }[]; dueDate: string; notes: string } {
   const cleaned = text.replace(/\n/g, ' ').trim();
@@ -96,10 +197,10 @@ function parseOrderText(text: string, recipes: Recipe[]): { customerName: string
     if (bestProduct && bestScore >= 3) {
       const existing = items.find(i => i.productId === bestProduct!.id);
       if (existing) { existing.quantity += qty; }
-      else { items.push({ productId: bestProduct.id, quantity: qty, unitPrice: bestProduct.retailPriceDozen, costSnapshot: 0 }); }
+      else { items.push({ productId: bestProduct.id, quantity: qty, unitPrice: roundCurrency(bestProduct.retailPriceDozen / UNITS_PER_DOZEN), costSnapshot: 0 }); }
     }
   }
-  if (!items.length) { items.push({ productId: recipes[0]?.id || '', quantity: 1, unitPrice: recipes[0]?.retailPriceDozen || 0, costSnapshot: 0 }); }
+  if (!items.length) { items.push({ productId: recipes[0]?.id || '', quantity: 1, unitPrice: roundCurrency((recipes[0]?.retailPriceDozen || 0) / UNITS_PER_DOZEN), costSnapshot: 0 }); }
   return { customerName, items, dueDate, notes: cleaned };
 }
 
@@ -127,7 +228,10 @@ function Input({ className = '', onChange, ...props }: React.InputHTMLAttributes
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (props.type === 'number' && onChange) {
       let val = e.target.value;
-      val = val.replace(/^0+(?=\d)/, '');
+      // Strip leading zeros only if not starting with "0." (preserve decimal numbers like 0.5)
+      if (!val.startsWith('0.') && !val.startsWith('0,')) {
+        val = val.replace(/^0+(?=\d)/, '');
+      }
       if (val !== e.target.value) {
         e.target.value = val;
       }
@@ -162,7 +266,7 @@ function AppShell({ children }: { children: ReactNode }) {
 
 function Dashboard() {
   const { store, update } = useStore();
-  const [revPeriod, setRevPeriod] = useState<RevenuePeriod>('month');
+  const [revPeriod, setRevPeriod] = useState<RevenuePeriod>('week');
   const revLabel = revenuePeriodLabel(revPeriod);
   const now = new Date();
   const currentMonth = now.getMonth();
@@ -240,9 +344,9 @@ function Dashboard() {
     <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_1fr_1fr]"><Card className="p-5"><div className="mb-5 flex items-center gap-3"><span className="rounded-lg bg-secondary p-2"><Wallet size={17} /></span><div><h2 className="font-semibold">Cash pulse</h2><p className="text-xs text-muted-foreground">Received vs recorded outflow</p></div></div><div className="flex items-end gap-4"><p className="mono text-3xl font-semibold">{money(received - expenses)}</p><span className={cx('mb-1 text-xs font-semibold', received >= expenses ? 'text-primary' : 'text-destructive')}>{received >= expenses ? 'positive' : 'watch this'}</span></div><div className="mt-4 h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${Math.min(100, received ? expenses / received * 100 : 0)}%` }} /></div><div className="mt-2 flex justify-between text-xs text-muted-foreground"><span>expenses {money(expenses)}</span><span>received {money(received)}</span></div></Card><Card className="p-5"><div className="mb-4 flex items-center gap-3"><span className="rounded-lg bg-accent/35 p-2"><CalendarDays size={17} /></span><div><h2 className="font-semibold">Quick actions</h2><p className="text-xs text-muted-foreground">Keep the desk moving.</p></div></div><div className="grid grid-cols-2 gap-2"><Quick href="/orders?new=1" icon={Receipt} label="Record order" /><Quick href="/expenses?new=1" icon={Wallet} label="Add expense" /><Quick href="/inventory?new=1" icon={Box} label="Adjust stock" /><Quick href="/reports" icon={BarChart3} label="See reports" /></div></Card><Card className="p-5"><div className="mb-4 flex items-center gap-3"><span className="rounded-lg bg-primary/10 p-2 text-primary"><TrendingUp size={17} /></span><div><h2 className="font-semibold">Top bake</h2><p className="text-xs text-muted-foreground">By sales value this month</p></div></div>{store.recipes.slice(0, 3).map((p, i) => <div key={p.id} className="mb-3 flex items-center gap-3 last:mb-0"><span className="mono w-4 text-xs text-muted-foreground">0{i + 1}</span><div className="min-w-0 flex-1"><div className="flex justify-between text-sm"><span className="truncate font-medium">{p.name}</span><span className="mono ml-2 text-xs">{money(p.retailPriceDozen)}</span></div><div className="mt-1.5 h-1 rounded-full bg-muted"><div className="h-full rounded-full bg-secondary" style={{ width: `${100 - i * 18}%` }} /></div></div></div>)}</Card></div>
   </div>;
 }
-function Metric({ label, value, trend, note, icon: Icon, tone }: { label: string; value: string; trend: string; note: string; icon: typeof TrendingUp; tone: string }) {
+function Metric({ label, value, trend, note, icon: Icon, tone }: { label: string; value: string; trend?: string; note: string; icon: typeof TrendingUp; tone: string }) {
   const bg = tone === 'primary' ? 'bg-primary text-primary-foreground' : tone === 'lime' ? 'bg-secondary text-secondary-foreground' : tone === 'peach' ? 'bg-accent/45' : 'bg-sidebar text-sidebar-foreground';
-  return <Card className={cx('relative overflow-hidden border-0 p-5', bg)}><div className="flex items-start justify-between"><div><p className="text-xs opacity-70">{label}</p><p className="mono mt-3 text-[1.7rem] font-semibold tracking-tight">{value}</p></div><Icon size={20} className="opacity-70" /></div><div className="mt-4 flex items-center justify-between text-xs"><span className="font-semibold">{trend}</span><span className="opacity-65">{note}</span></div></Card>;
+  return <Card className={cx('relative overflow-hidden border-0 p-5', bg)}><div className="flex items-start justify-between"><div><p className="text-xs opacity-70">{label}</p><p className="mono mt-3 text-[1.7rem] font-semibold tracking-tight">{value}</p></div><Icon size={20} className="opacity-70" /></div><div className="mt-4 flex items-center justify-between gap-3 text-xs"><span className="font-semibold">{trend}</span><span className="text-right opacity-65">{note}</span></div></Card>;
 }
 function Quick({ href, icon: Icon, label }: { href: string; icon: typeof Receipt; label: string }) { return <Link href={href} className="flex items-center gap-2 rounded-lg border px-3 py-2.5 text-xs font-semibold hover:border-primary hover:bg-primary/5"><Icon size={15} className="text-primary" />{label}</Link>; }
 function OrderRow({ order, store }: { order: Order; store: Store }) {
@@ -433,7 +537,27 @@ function SwipeableRow({ onEdit, onDelete, children }: { onEdit: () => void; onDe
 function Ingredients() {
   const { store, update } = useStore(); const isMobile = useIsMobile(); const [edit, setEdit] = useState<Ingredient | null>(null); const [search, setSearch] = useState(''); const [deletingIngredient, setDeletingIngredient] = useState<Ingredient | null>(null); const [deleteStep, setDeleteStep] = useState(0);
   const rows = store.ingredients.filter(i => i.name.toLowerCase().includes(search.toLowerCase()));
-  const saveIngredient = (i: Ingredient) => { const exists = store.ingredients.some(x => x.id === i.id); update({ ingredients: exists ? store.ingredients.map(x => x.id === i.id ? i : x) : [...store.ingredients, i], auditLog: [createAuditEntry('Ingredients', exists ? 'updated' : 'created', i.id, i.name, `${exists ? 'Updated' : 'Created'} ingredient: ${i.name}`), ...store.auditLog], notifications: [createNotification(`Ingredient ${exists ? 'updated' : 'created'}`, `${i.name} was ${exists ? 'updated' : 'created'}`, 'Ingredients', i.id), ...store.notifications] }); setEdit(null); };
+  const saveIngredient = (i: Ingredient) => {
+    const prev = store.ingredients.find(x => x.id === i.id);
+    const history = (i.priceHistory || []).slice();
+    // Prices move. Keep every change so a recipe's cost can be explained later.
+    if (i.purchasePrice > 0) {
+      const last = history[history.length - 1];
+      const firstPrice = !prev && history.length === 0;
+      const changed = prev !== undefined && prev.purchasePrice !== i.purchasePrice;
+      if ((firstPrice || changed) && (!last || last.price !== i.purchasePrice)) {
+        history.push({ date: today(), price: i.purchasePrice });
+      }
+    }
+    const next: Ingredient = { ...i, priceHistory: history };
+    const exists = prev !== undefined;
+    update({
+      ingredients: exists ? store.ingredients.map(x => x.id === next.id ? next : x) : [...store.ingredients, next],
+      auditLog: [createAuditEntry('Ingredients', exists ? 'updated' : 'created', next.id, next.name, `${exists ? 'Updated' : 'Created'} ingredient: ${next.name}${changedPrice(prev, next)}`), ...store.auditLog],
+      notifications: [createNotification(`Ingredient ${exists ? 'updated' : 'created'}`, `${next.name} was ${exists ? 'updated' : 'created'}`, 'Ingredients', next.id), ...store.notifications],
+    });
+    setEdit(null);
+  };
   const removeIngredient = (i: Ingredient) => { setDeletingIngredient(i); setDeleteStep(1); };
   const confirmDeleteStep1 = () => setDeleteStep(2);
   const confirmDeleteStep2 = () => { if (!deletingIngredient) return; const i = deletingIngredient; update({ ingredients: store.ingredients.filter(x => x.id !== i.id), auditLog: [createAuditEntry('Ingredients', 'deleted', i.id, i.name, `Deleted ingredient: ${i.name}`), ...store.auditLog], notifications: [createNotification('Ingredient deleted', `${i.name} was removed`, 'Ingredients', i.id), ...store.notifications] }); setDeletingIngredient(null); setDeleteStep(0); };
@@ -464,12 +588,15 @@ function IngredientModal({ value, onClose, onSave }: { value: Ingredient; onClos
     else if (i.unit === 'L' && newUnit === 'ml') { setI(x => ({ ...x, unit: newUnit, packSize: x.packSize * 1000, currentStock: x.currentStock * 1000, minimumStock: x.minimumStock * 1000 })); }
     else { set('unit', newUnit); }
   };
-  return <Modal title={value.name ? 'Edit ingredient' : 'New ingredient'} subtitle="Set pricing, supplier info, and minimum stock level." onClose={onClose}><form onSubmit={e => { e.preventDefault(); onSave(i); }} className="space-y-4"><div className="grid gap-4 sm:grid-cols-2"><Field label="Ingredient name"><Input required value={i.name} onChange={e => set('name', e.target.value)} /></Field><Field label="Category"><Select value={i.category} onChange={e => set('category', e.target.value)}>{INGREDIENT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</Select></Field><Field label="Pack size" hint={i.unit === 'g' && i.packSize < 1000 ? 'Enter 1000+ to auto-convert to kg' : i.unit === 'ml' && i.packSize < 1000 ? 'Enter 1000+ to auto-convert to L' : undefined}><Input type="number" min="0" step=".01" value={i.packSize} onChange={e => handlePackSizeChange(Number(e.target.value))} /></Field><Field label="Unit"><Select value={i.unit} onChange={e => handleUnitChange(e.target.value)}><option value="g">grams (g)</option><option value="kg">kilograms (kg)</option><option value="ml">millilitres (ml)</option><option value="L">litres (L)</option><option value="each">each</option></Select></Field><Field label="Purchase price" hint={!i.purchasePrice ? 'Leave 0 until you have the receipt.' : undefined}><Input type="number" min="0" step=".01" value={i.purchasePrice} onChange={e => set('purchasePrice', Number(e.target.value))} /></Field><Field label="Supplier"><Input value={i.supplier} onChange={e => set('supplier', e.target.value)} /></Field></div><Field label="Minimum stock level" hint="Alert when stock falls below this amount"><div className="relative"><Input type="number" min="0" step=".01" value={i.minimumStock} onChange={e => set('minimumStock', Number(e.target.value))} className="pr-12" /><span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground font-semibold">{i.unit}</span></div></Field><Field label="Notes"><textarea className="min-h-20 w-full rounded-lg border bg-background p-3 text-sm outline-none focus:border-primary" value={i.notes} onChange={e => set('notes', e.target.value)} /></Field><div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={onClose}>Cancel</Button><Button type="submit">Save ingredient</Button></div></form></Modal>;
+  const history = (i.priceHistory || []).slice().sort((a, b) => b.date.localeCompare(a.date));
+  return <Modal title={value.name ? 'Edit ingredient' : 'New ingredient'} subtitle="Pricing, pack size and supplier. Stock levels are edited under Inventory." onClose={onClose}><form onSubmit={e => { e.preventDefault(); onSave(i); }} className="space-y-4"><div className="grid gap-4 sm:grid-cols-2"><Field label="Ingredient name"><Input required value={i.name} onChange={e => set('name', e.target.value)} /></Field><Field label="Category"><Select value={i.category} onChange={e => set('category', e.target.value)}>{INGREDIENT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</Select></Field><Field label="Pack size" hint={i.unit === 'g' && i.packSize < 1000 ? 'Enter 1000+ to auto-convert to kg' : i.unit === 'ml' && i.packSize < 1000 ? 'Enter 1000+ to auto-convert to L' : undefined}><Input type="number" min="0" step=".01" value={i.packSize} onChange={e => handlePackSizeChange(Number(e.target.value))} /></Field><Field label="Unit"><Select value={i.unit} onChange={e => handleUnitChange(e.target.value)}><option value="g">grams (g)</option><option value="kg">kilograms (kg)</option><option value="ml">millilitres (ml)</option><option value="L">litres (L)</option><option value="each">each</option></Select></Field><Field label="Purchase price" hint={!i.purchasePrice ? 'Leave 0 until you have the receipt.' : undefined}><Input type="number" min="0" step=".01" value={i.purchasePrice} onChange={e => set('purchasePrice', Number(e.target.value))} /></Field><Field label="Supplier"><Input value={i.supplier} onChange={e => set('supplier', e.target.value)} /></Field></div><Field label="Price history" hint="Prices move — every change to this pack is kept here."><div className="max-h-40 divide-y overflow-auto rounded-lg border">{history.slice(0, 12).map((p, idx) => { const prev = history[idx + 1]; const delta = prev ? p.price - prev.price : 0; return <div key={`${p.date}-${idx}`} className="flex items-center justify-between px-3 py-2 text-xs"><span className="text-muted-foreground">{shortDate(p.date)}</span><span className="flex items-center gap-2">{delta !== 0 && <span className={cx('text-[10px] font-semibold', delta > 0 ? 'text-destructive' : 'text-emerald-700')}>{delta > 0 ? '▲' : '▼'} {money(Math.abs(delta))}</span>}<span className="mono font-semibold">{money(p.price)}</span></span></div>; })}{!history.length && <p className="px-3 py-3 text-xs text-muted-foreground">No price changes recorded yet — the first one appears the moment you change the price.</p>}</div></Field><Field label="Notes"><textarea className="min-h-20 w-full rounded-lg border bg-background p-3 text-sm outline-none focus:border-primary" value={i.notes} onChange={e => set('notes', e.target.value)} /></Field><div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={onClose}>Cancel</Button><Button type="submit">Save ingredient</Button></div></form></Modal>;
 }
 
 function Recipes() {
-  const { store, update } = useStore(); const isMobile = useIsMobile(); const [selected, setSelected] = useState<Recipe | null>(null); const [deletingRecipe, setDeletingRecipe] = useState<Recipe | null>(null); const [deleteStep, setDeleteStep] = useState(0); const [printView, setPrintView] = useState<null | 'recipes' | 'cards'>(null);
+  const { store, update } = useStore(); const isMobile = useIsMobile(); const [selected, setSelected] = useState<Recipe | null>(null); const [deletingRecipe, setDeletingRecipe] = useState<Recipe | null>(null); const [deleteStep, setDeleteStep] = useState(0); const [printView, setPrintView] = useState<null | 'recipes' | 'cards' | 'current'>(null);
   const [showVersionHistory, setShowVersionHistory] = useState<Recipe | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const active = store.recipes.find(r => r.id === activeId) || store.recipes[0] || null;
   const save = (r: Recipe) => { 
     const exists = store.recipes.some(x => x.id === r.id);
     let updatedRecipe = r;
@@ -532,13 +659,232 @@ function Recipes() {
   const confirmDeleteStep2 = () => { if (!deletingRecipe) return; update({ recipes: store.recipes.filter(x => x.id !== deletingRecipe.id), auditLog: [createAuditEntry('Recipes', 'deleted', deletingRecipe.id, deletingRecipe.name, `Deleted recipe: ${deletingRecipe.name}`), ...store.auditLog], notifications: [createNotification('Recipe deleted', `${deletingRecipe.name} was removed`, 'Recipes', deletingRecipe.id), ...store.notifications] }); setDeletingRecipe(null); setDeleteStep(0); };
   const cancelDelete = () => { setDeletingRecipe(null); setDeleteStep(0); };
   const newRecipe = (): Recipe => ({ id: id('recipe'), name: '', category: 'Cookies', description: '', image: '', batchYield: 24, servingSize: '1 dozen', laborCost: 0, energyCost: 0, packagingCost: 0, wastagePercent: 0, retailPriceDozen: 0, wholesalePriceDozen: 0, active: true, ovenTemp: '170-180°C', bakeTimeMinutes: 14, ingredients: [], doughWeight: 0, finishedWeight: 0, notes: '' });
-  if (isMobile) { return <div><div className="mb-4 flex items-center justify-between"><h1 className="display text-xl font-semibold">Recipes</h1><span className="flex items-center gap-2"><span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-semibold text-secondary-foreground">{store.recipes.length} recipes</span><Button variant="soft" onClick={() => setPrintView('recipes')} aria-label="Print recipe book"><FileText size={15} /></Button></span></div><div className="mb-3 flex items-center justify-center gap-4 text-[10px] text-muted-foreground"><span className="flex items-center gap-1"><ArrowUpRight size={10} /> Swipe right to edit</span><span className="flex items-center gap-1">Swipe left to delete <ArrowDownRight size={10} /></span></div><div className="mb-4"><div className="mb-2 flex items-center justify-between gap-2"><h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Baking Reference</h2><Button variant="soft" onClick={() => setPrintView('cards')}><FileText size={13} /> Print cards</Button></div><BakingReferenceCards recipes={store.recipes} ingredients={store.ingredients} /></div><div className="space-y-3">{store.recipes.map(r => { const c = costOfRecipe(r, store.ingredients); const issues = recipeCostIssues(r, store.ingredients); return <SwipeableRow key={r.id} onEdit={() => setSelected(r)} onDelete={() => removeRecipe(r)}><Card className="overflow-hidden"><div className="bg-sidebar p-4 text-sidebar-foreground"><div className="flex items-center justify-between"><p className="font-semibold text-sm">{r.name || 'Unnamed recipe'}</p><div className="flex items-center gap-2"><span className="rounded-full bg-sidebar-primary px-2 py-0.5 text-[10px] font-semibold text-sidebar-primary-foreground">yield {r.batchYield}</span>{r.version && r.version > 1 && <button onClick={() => setShowVersionHistory(r)} className="rounded-full bg-sidebar-accent px-2 py-0.5 text-[9px] font-semibold text-sidebar-foreground">v{r.version}</button>}</div></div></div><div className="p-4"><div className="mb-2 flex items-start justify-between gap-3"><span className="text-[10px] text-muted-foreground">Batch cost</span><span className="text-right"><span className="mono text-sm font-semibold">{money(c)}</span>{issues.count > 0 && <span className="mt-0.5 block text-[10px] font-medium text-destructive">{recipeIssueLabel(issues)}</span>}</span></div><p className="text-[10px] text-muted-foreground">{r.ingredients.length} ingredients</p></div></Card></SwipeableRow>; })}{!store.recipes.length && <Empty icon={BookOpen} title="No recipes yet" detail="Link ingredients to products to calculate batch costs." />}</div>{selected && <RecipeModal value={selected} ingredients={store.ingredients} onClose={() => setSelected(null)} onSave={save} />}{showVersionHistory && <RecipeVersionHistory recipe={showVersionHistory} onClose={() => setShowVersionHistory(null)} onRevert={(v) => revertToVersion(showVersionHistory, v)} />}{deletingRecipe && <Modal title="Delete recipe" onClose={cancelDelete}><div className="space-y-4"><p className="text-sm text-muted-foreground">{deleteStep === 1 ? <>Are you sure you want to delete <strong>{deletingRecipe.name}</strong>?</> : <><strong>This cannot be undone.</strong> Type <span className="font-semibold">DELETE</span> to confirm.</>}</p>{deleteStep === 2 && <Input autoFocus placeholder="Type DELETE to confirm" onChange={e => { if (e.target.value === 'DELETE') confirmDeleteStep2(); }} />}<div className="flex justify-end gap-2"><Button variant="ghost" onClick={cancelDelete}>Cancel</Button>{deleteStep === 1 && <Button variant="danger" onClick={confirmDeleteStep1}>Delete</Button>}</div></div></Modal>}{printView === 'recipes' && createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && setPrintView(null)}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Recipes</p><h2 className="display text-2xl font-semibold">Recipe Book</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={() => setPrintView(null)}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Recipe Book")}><FileText size={16} /> Print or save PDF</Button></div></div><RecipesPrintDocument recipes={store.recipes} store={store} /></div></div>, document.body)}{printView === 'cards' && createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && setPrintView(null)}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Baking reference</p><h2 className="display text-2xl font-semibold">Reference Cards</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={() => setPrintView(null)}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Baking Reference Cards")}><FileText size={16} /> Print or save PDF</Button></div></div><BakingReferencePrintDocument recipes={store.recipes} /></div></div>, document.body)}</div>;
+  if (isMobile) {
+    return (
+      <div>
+        <div className="mb-4 flex items-center justify-between">
+          <h1 className="display text-xl font-semibold">Recipes</h1>
+          <span className="flex items-center gap-2">
+            <span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-semibold text-secondary-foreground">{store.recipes.length} recipes</span>
+            <Button variant="soft" onClick={() => setPrintView('current')} disabled={!active} aria-label={`Print ${active?.name || 'current recipe'}`} title={active ? `Print only ${active.name}` : 'No recipe selected'}><BookOpen size={15} /></Button>
+            <Button variant="soft" onClick={() => setPrintView('recipes')} aria-label="Print recipe book"><FileText size={15} /></Button>
+          </span>
+        </div>
+
+        <div className="mb-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Choose a recipe</h2>
+            <span className="text-[10px] text-muted-foreground">{store.recipes.length} total</span>
+          </div>
+          {store.recipes.length ? (
+            <div className="grid grid-cols-2 gap-2">
+              {store.recipes.map(r => {
+                const c = costOfRecipe(r, store.ingredients);
+                const issues = recipeCostIssues(r, store.ingredients);
+                const isActive = active?.id === r.id;
+                return (
+                  <button key={r.id} type="button" onClick={() => setActiveId(r.id)} className={cx('rounded-xl border px-3 py-2 text-left transition-colors', isActive ? 'border-primary bg-primary/10' : 'border-border bg-card hover:bg-muted/50')}>
+                    <div className="flex items-start justify-between gap-1.5">
+                      <p className="min-w-0 truncate text-xs font-semibold">{r.name || 'Unnamed recipe'}</p>
+                      {r.version && r.version > 1 && <span className="shrink-0 rounded-full bg-secondary px-1.5 py-0.5 text-[9px] font-semibold text-secondary-foreground">v{r.version}</span>}
+                    </div>
+                    <div className="mt-1 flex items-center justify-between gap-1 text-[10px] text-muted-foreground">
+                      <span>yield {r.batchYield}</span>
+                      <span className={cx('mono font-semibold', issues.count > 0 ? 'text-destructive' : 'text-foreground')}>{money(c)}</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <Empty icon={BookOpen} title="No recipes yet" detail="Link ingredients to products to calculate batch costs." />
+          )}
+        </div>
+
+        {active && (
+          <div className="mb-4">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Recipe</h2>
+              <span className="text-[10px] text-muted-foreground">Swipe right to edit, left to delete</span>
+            </div>
+            <SwipeableRow onEdit={() => setSelected(active)} onDelete={() => removeRecipe(active)}>
+              <Card className="overflow-hidden">
+                <div className="bg-sidebar p-4 text-sidebar-foreground">
+                  <div className="flex items-center justify-between">
+                    <p className="font-semibold text-sm">{active.name || 'Unnamed recipe'}</p>
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-full bg-sidebar-primary px-2 py-0.5 text-[10px] font-semibold text-sidebar-primary-foreground">yield {active.batchYield}</span>
+                      {active.version && active.version > 1 && <button onClick={() => setShowVersionHistory(active)} className="rounded-full bg-sidebar-accent px-2 py-0.5 text-[9px] font-semibold text-sidebar-foreground">v{active.version}</button>}
+                    </div>
+                  </div>
+                </div>
+                <div className="p-4">
+                  <div className="mb-3 flex items-start justify-between gap-3 border-b pb-3">
+                    <span className="text-[10px] text-muted-foreground">Batch cost</span>
+                    <span className="text-right">
+                      <span className="mono text-sm font-semibold">{money(costOfRecipe(active, store.ingredients))}</span>
+                      {recipeCostIssues(active, store.ingredients).count > 0 && <span className="mt-0.5 block text-[10px] font-medium text-destructive">{recipeIssueLabel(recipeCostIssues(active, store.ingredients))}</span>}
+                    </span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {active.ingredients.slice(0, 6).map(row => (
+                      <div key={row.ingredientId} className="flex justify-between text-xs">
+                        <span className="text-muted-foreground">{store.ingredients.find(i => i.id === row.ingredientId)?.name || 'Unknown ingredient'}</span>
+                        <span className="mono text-[11px]">{row.quantity}{row.unit}</span>
+                      </div>
+                    ))}
+                    {active.ingredients.length > 6 && <p className="pt-1 text-[10px] text-primary">+ {active.ingredients.length - 6} more ingredients</p>}
+                    {!active.ingredients.length && <p className="text-[10px] text-muted-foreground">No ingredients linked yet.</p>}
+                  </div>
+                  <div className="mt-3 flex items-center justify-between border-t pt-3">
+                    <span className="text-[10px] text-muted-foreground">{active.ingredients.length} ingredients</span>
+                    <Button variant="ghost" className="text-xs" onClick={() => setSelected(active)}><Pencil size={13} /> Edit recipe</Button>
+                  </div>
+                </div>
+              </Card>
+            </SwipeableRow>
+          </div>
+        )}
+
+        <div className="mt-2">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Baking Reference</h2>
+            <Button variant="soft" onClick={() => setPrintView('cards')}><FileText size={13} /> Print cards</Button>
+          </div>
+          <BakingReferenceCards recipes={store.recipes} ingredients={store.ingredients} />
+        </div>
+
+        {selected && <RecipeModal value={selected} ingredients={store.ingredients} onClose={() => setSelected(null)} onSave={save} />}
+        {showVersionHistory && <RecipeVersionHistory recipe={showVersionHistory} onClose={() => setShowVersionHistory(null)} onRevert={(v) => revertToVersion(showVersionHistory, v)} />}
+        {deletingRecipe && <Modal title="Delete recipe" onClose={cancelDelete}><div className="space-y-4"><p className="text-sm text-muted-foreground">{deleteStep === 1 ? <>Are you sure you want to delete <strong>{deletingRecipe.name}</strong>?</> : <><strong>This cannot be undone.</strong> Type <span className="font-semibold">DELETE</span> to confirm.</>}</p>{deleteStep === 2 && <Input autoFocus placeholder="Type DELETE to confirm" onChange={e => { if (e.target.value === 'DELETE') confirmDeleteStep2(); }} />}<div className="flex justify-end gap-2"><Button variant="ghost" onClick={cancelDelete}>Cancel</Button>{deleteStep === 1 && <Button variant="danger" onClick={confirmDeleteStep1}>Delete</Button>}</div></div></Modal>}
+        {printView === 'current' && active && createPortal(<div className="print-portal fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && setPrintView(null)}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Recipe</p><h2 className="display text-2xl font-semibold">{active.name || 'Unnamed recipe'}</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={() => setPrintView(null)}>Close</Button><Button onClick={() => printWithTitle(`Little Bliss Bakery - ${active.name || 'Recipe'}`)}><FileText size={16} /> Print or save PDF</Button></div></div><RecipesPrintDocument recipes={[active]} store={store} single /></div></div>, document.body)}
+        {printView === 'recipes' && createPortal(<div className="print-portal fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && setPrintView(null)}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Recipes</p><h2 className="display text-2xl font-semibold">Recipe Book</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={() => setPrintView(null)}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Recipe Book")}><FileText size={16} /> Print or save PDF</Button></div></div><RecipesPrintDocument recipes={store.recipes} store={store} /></div></div>, document.body)}
+        {printView === 'cards' && createPortal(<div className="print-portal fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && setPrintView(null)}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Baking reference</p><h2 className="display text-2xl font-semibold">Reference Cards</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={() => setPrintView(null)}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Baking Reference Cards")}><FileText size={16} /> Print or save PDF</Button></div></div><BakingReferencePrintDocument recipes={store.recipes} /></div></div>, document.body)}
+      </div>
+    );
   }
-  return <div><PageHeader eyebrow="Bake book" title="Recipes" description="Build batches with costs that update as your pantry prices change." action={<div className="flex gap-2"><Button onClick={() => setSelected(newRecipe())}><Plus size={16} /> Add recipe</Button><Button variant="soft" onClick={() => setPrintView('recipes')}><FileText size={16} /> Print all</Button></div>} /><div className="mb-6"><div className="mb-3 flex items-center justify-between"><h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Baking Reference Cards</h2><Button variant="soft" className="text-xs" onClick={() => setPrintView('cards')}><FileText size={14} /> Print cards</Button></div><BakingReferenceCards recipes={store.recipes} ingredients={store.ingredients} /></div><div className="grid gap-4 lg:grid-cols-3">{store.recipes.map(r => { const issues = recipeCostIssues(r, store.ingredients); const c = costOfRecipe(r, store.ingredients); return <Card key={r.id} className="flex flex-col overflow-hidden"><div className="flex items-start justify-between bg-sidebar p-5 text-sidebar-foreground"><div><p className="mono text-[10px] uppercase tracking-wider text-sidebar-foreground/60">Recipe {r.id.replace('recipe-', '').toUpperCase()}</p><h2 className="display mt-2 text-xl font-semibold">{r.name}</h2></div><div className="flex items-center gap-2"><span className="rounded-full bg-sidebar-primary px-2 py-1 text-[10px] font-semibold text-sidebar-primary-foreground">yield {r.batchYield}</span>{r.version && r.version > 1 && <button onClick={() => setShowVersionHistory(r)} className="rounded-full bg-sidebar-accent px-2 py-1 text-[10px] font-semibold text-sidebar-foreground hover:bg-sidebar-primary/20">v{r.version}</button>}</div></div><div className="flex-1 p-5"><div className="mb-4 flex items-start justify-between gap-3 border-b pb-3"><span className="text-xs text-muted-foreground">Estimated batch cost</span><span className="text-right"><span className="mono font-semibold">{money(c)}</span>{issues.count > 0 && <span className="mt-0.5 block text-[10px] font-medium text-destructive">{recipeIssueLabel(issues)}</span>}</span></div><div className="space-y-2">{r.ingredients.slice(0, 5).map(row => <div key={row.ingredientId} className="flex justify-between text-sm"><span className="text-muted-foreground">{store.ingredients.find(i => i.id === row.ingredientId)?.name || 'Unknown ingredient'}</span><span className="mono text-xs">{row.quantity}{row.unit}</span></div>)}{r.ingredients.length > 5 && <p className="pt-1 text-xs text-primary">+ {r.ingredients.length - 5} more ingredients</p>}</div></div><div className="flex items-center justify-between border-t bg-muted/30 px-5 py-3"><span className="text-xs text-muted-foreground">{r.ingredients.length} ingredients</span><Button variant="ghost" className="text-xs" onClick={() => setSelected(r)}><Pencil size={14} /> Edit recipe</Button></div></Card>; })}</div>{selected && <RecipeModal value={selected} ingredients={store.ingredients} onClose={() => setSelected(null)} onSave={save} />}{printView === 'recipes' && createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && setPrintView(null)}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Recipes</p><h2 className="display text-2xl font-semibold">Recipe Book</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={() => setPrintView(null)}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Recipe Book")}><FileText size={16} /> Print or save PDF</Button></div></div><RecipesPrintDocument recipes={store.recipes} store={store} /></div></div>, document.body)}{printView === 'cards' && createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && setPrintView(null)}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Baking reference</p><h2 className="display text-2xl font-semibold">Reference Cards</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={() => setPrintView(null)}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Baking Reference Cards")}><FileText size={16} /> Print or save PDF</Button></div></div><BakingReferencePrintDocument recipes={store.recipes} /></div></div>, document.body)}</div>;
+  return (
+    <div>
+      <PageHeader eyebrow="Bake book" title="Recipes" description="Build batches with costs that update as your pantry prices change." action={<div className="flex flex-wrap gap-2"><Button onClick={() => setSelected(newRecipe())}><Plus size={16} /> Add recipe</Button><Button variant="soft" onClick={() => setPrintView('current')} disabled={!active} title={active ? `Print only ${active.name || 'this recipe'}` : 'Select a recipe first'}><BookOpen size={16} /> Print current</Button><Button variant="soft" onClick={() => setPrintView('recipes')}><FileText size={16} /> Print all</Button></div>} />
+
+      <div className="mb-6">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Choose a recipe</h2>
+          <span className="text-xs text-muted-foreground">{store.recipes.length} recipes</span>
+        </div>
+        {store.recipes.length ? (
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-4">
+            {store.recipes.map(r => {
+              const c = costOfRecipe(r, store.ingredients);
+              const issues = recipeCostIssues(r, store.ingredients);
+              const isActive = active?.id === r.id;
+              return (
+                <button key={r.id} type="button" onClick={() => setActiveId(r.id)} className={cx('rounded-xl border px-3.5 py-3 text-left transition-colors', isActive ? 'border-primary bg-primary/10' : 'border-border bg-card hover:bg-muted/50')}>
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="min-w-0 truncate text-sm font-semibold">{r.name || 'Unnamed recipe'}</p>
+                    {r.version && r.version > 1 && <span className="shrink-0 rounded-full bg-secondary px-1.5 py-0.5 text-[9px] font-semibold text-secondary-foreground">v{r.version}</span>}
+                  </div>
+                  <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                    <span>yield {r.batchYield} · {r.ingredients.length} ing</span>
+                    <span className={cx('mono font-semibold', issues.count > 0 ? 'text-destructive' : 'text-foreground')}>{money(c)}</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <Empty icon={BookOpen} title="No recipes yet" detail="Link ingredients to products to calculate batch costs." />
+        )}
+      </div>
+
+      <div className="mb-6">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Recipe</h2>
+          {active && (
+            <div className="flex gap-2">
+              <Button variant="ghost" className="text-xs" onClick={() => setShowVersionHistory(active)}><History size={14} /> Version history</Button>
+              <Button variant="soft" className="text-xs" onClick={() => setSelected(active)}><Pencil size={14} /> Edit recipe</Button>
+            </div>
+          )}
+        </div>
+        {active && (
+          <Card className="flex flex-col overflow-hidden">
+            <div className="flex items-start justify-between bg-sidebar p-5 text-sidebar-foreground">
+              <div>
+                <p className="mono text-[10px] uppercase tracking-wider text-sidebar-foreground/60">Recipe {active.id.replace('recipe-', '').toUpperCase()}</p>
+                <h2 className="display mt-2 text-xl font-semibold">{active.name || 'Unnamed recipe'}</h2>
+                {active.category && <p className="mt-1 text-xs text-sidebar-foreground/70">{active.category}</p>}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="rounded-full bg-sidebar-primary px-2 py-1 text-[10px] font-semibold text-sidebar-primary-foreground">yield {active.batchYield}</span>
+                {active.version && active.version > 1 && <button onClick={() => setShowVersionHistory(active)} className="rounded-full bg-sidebar-accent px-2 py-1 text-[10px] font-semibold text-sidebar-foreground hover:bg-sidebar-primary/20">v{active.version}</button>}
+              </div>
+            </div>
+            <div className="grid gap-6 p-5 md:grid-cols-2">
+              <div>
+                <div className="mb-4 flex items-start justify-between gap-3 border-b pb-3">
+                  <span className="text-xs text-muted-foreground">Estimated batch cost</span>
+                  <span className="text-right">
+                    <span className="mono font-semibold">{money(costOfRecipe(active, store.ingredients))}</span>
+                    {recipeCostIssues(active, store.ingredients).count > 0 && <span className="mt-0.5 block text-[10px] font-medium text-destructive">{recipeIssueLabel(recipeCostIssues(active, store.ingredients))}</span>}
+                  </span>
+                </div>
+                <dl className="space-y-2 text-sm">
+                  <div className="flex items-center justify-between gap-3"><dt className="text-muted-foreground">Oven temperature</dt><dd className="mono text-xs">{active.ovenTemp || '—'}</dd></div>
+                  <div className="flex items-center justify-between gap-3"><dt className="text-muted-foreground">Bake time</dt><dd className="mono text-xs">{active.bakeTimeMinutes ? active.bakeTimeMinutes + ' min' : '—'}</dd></div>
+                  <div className="flex items-center justify-between gap-3"><dt className="text-muted-foreground">Serving size</dt><dd className="text-xs">{active.servingSize || '—'}</dd></div>
+                  <div className="flex items-center justify-between gap-3"><dt className="text-muted-foreground">Retail / wholesale</dt><dd className="mono text-xs">{money(active.retailPriceDozen)} / {money(active.wholesalePriceDozen)}</dd></div>
+                </dl>
+              </div>
+              <div>
+                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Ingredients</p>
+                <div className="max-h-56 space-y-2 overflow-auto pr-1">
+                  {active.ingredients.map(row => (
+                    <div key={row.ingredientId} className="flex justify-between gap-3 text-sm">
+                      <span className="text-muted-foreground">{store.ingredients.find(i => i.id === row.ingredientId)?.name || 'Unknown ingredient'}</span>
+                      <span className="mono text-xs">{row.quantity}{row.unit}</span>
+                    </div>
+                  ))}
+                  {!active.ingredients.length && <p className="text-xs text-muted-foreground">No ingredients linked yet.</p>}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center justify-between border-t bg-muted/30 px-5 py-3">
+              <span className="text-xs text-muted-foreground">{active.ingredients.length} ingredients</span>
+              <Button variant="ghost" className="text-xs" onClick={() => setSelected(active)}><Pencil size={14} /> Edit recipe</Button>
+            </div>
+          </Card>
+        )}
+      </div>
+
+      <div className="mb-6">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Baking Reference Cards</h2>
+          <Button variant="soft" className="text-xs" onClick={() => setPrintView('cards')}><FileText size={14} /> Print cards</Button>
+        </div>
+        <BakingReferenceCards recipes={store.recipes} ingredients={store.ingredients} />
+      </div>
+
+      {selected && <RecipeModal value={selected} ingredients={store.ingredients} onClose={() => setSelected(null)} onSave={save} />}
+      {showVersionHistory && <RecipeVersionHistory recipe={showVersionHistory} onClose={() => setShowVersionHistory(null)} onRevert={(v) => revertToVersion(showVersionHistory, v)} />}
+      {deletingRecipe && <Modal title="Delete recipe" onClose={cancelDelete}><div className="space-y-4"><p className="text-sm text-muted-foreground">{deleteStep === 1 ? <>Are you sure you want to delete <strong>{deletingRecipe.name}</strong>?</> : <><strong>This cannot be undone.</strong> Type <span className="font-semibold">DELETE</span> to confirm.</>}</p>{deleteStep === 2 && <Input autoFocus placeholder="Type DELETE to confirm" onChange={e => { if (e.target.value === 'DELETE') confirmDeleteStep2(); }} />}<div className="flex justify-end gap-2"><Button variant="ghost" onClick={cancelDelete}>Cancel</Button>{deleteStep === 1 && <Button variant="danger" onClick={confirmDeleteStep1}>Delete</Button>}</div></div></Modal>}
+      {printView === 'current' && active && createPortal(<div className="print-portal fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && setPrintView(null)}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Recipe</p><h2 className="display text-2xl font-semibold">{active.name || 'Unnamed recipe'}</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={() => setPrintView(null)}>Close</Button><Button onClick={() => printWithTitle(`Little Bliss Bakery - ${active.name || 'Recipe'}`)}><FileText size={16} /> Print or save PDF</Button></div></div><RecipesPrintDocument recipes={[active]} store={store} single /></div></div>, document.body)}
+        {printView === 'recipes' && createPortal(<div className="print-portal fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && setPrintView(null)}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Recipes</p><h2 className="display text-2xl font-semibold">Recipe Book</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={() => setPrintView(null)}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Recipe Book")}><FileText size={16} /> Print or save PDF</Button></div></div><RecipesPrintDocument recipes={store.recipes} store={store} /></div></div>, document.body)}
+      {printView === 'cards' && createPortal(<div className="print-portal fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && setPrintView(null)}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Baking reference</p><h2 className="display text-2xl font-semibold">Reference Cards</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={() => setPrintView(null)}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Baking Reference Cards")}><FileText size={16} /> Print or save PDF</Button></div></div><BakingReferencePrintDocument recipes={store.recipes} /></div></div>, document.body)}
+    </div>
+  );
 }
 function RecipeModal({ value, ingredients, onClose, onSave }: { value: Recipe; ingredients: Ingredient[]; onClose: () => void; onSave: (v: Recipe) => void }) {
   const [r, setR] = useState(value); const set = (k: keyof Recipe, v: string | number | boolean) => setR(x => ({ ...x, [k]: v })); const updateRow = (index: number, key: string, val: string | number) => setR(x => ({ ...x, ingredients: x.ingredients.map((row, i) => i === index ? { ...row, [key]: val } : row) }));
-  return <Modal title={value.name ? 'Edit recipe' : 'New recipe'} subtitle="Product details, pricing, and ingredient allocations in one place." onClose={onClose} wide><form onSubmit={e => { e.preventDefault(); onSave(r); }} className="space-y-5"><div className="grid gap-4 sm:grid-cols-2"><Field label="Recipe name"><Input required value={r.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Oat & Raisin Cookies" /></Field><Field label="Category"><Input value={r.category} onChange={e => set('category', e.target.value)} placeholder="e.g. Cookies" /></Field><Field label="Retail price / dozen"><Input type="number" min="0" step=".01" value={r.retailPriceDozen} onChange={e => set('retailPriceDozen', Number(e.target.value))} /></Field><Field label="Wholesale price / dozen"><Input type="number" min="0" step=".01" value={r.wholesalePriceDozen} onChange={e => set('wholesalePriceDozen', Number(e.target.value))} /></Field><Field label="Batch yield (per recipe)"><Input type="number" min="1" value={r.batchYield} onChange={e => set('batchYield', Number(e.target.value))} /></Field><Field label="Serving size"><Input value={r.servingSize} onChange={e => set('servingSize', e.target.value)} /></Field><Field label="Oven temperature" hint="e.g. 170-180°C"><Input value={r.ovenTemp || ''} onChange={e => set('ovenTemp', e.target.value)} placeholder="170-180°C" /></Field><Field label="Bake time (minutes)" hint="Per tray in the oven"><Input type="number" min="0" value={r.bakeTimeMinutes || ''} onChange={e => set('bakeTimeMinutes', Number(e.target.value))} placeholder="14" /></Field></div><Field label="Description"><textarea className="min-h-16 w-full rounded-lg border bg-background p-3 text-sm outline-none focus:border-primary" value={r.description} onChange={e => set('description', e.target.value)} placeholder="Brief description of this recipe" /></Field><div className="border-t pt-4"><p className="text-sm font-semibold mb-3">Ingredients</p><div className="mb-5 grid gap-4 sm:grid-cols-3"><Field label="Dough weight (g)"><Input type="number" value={r.doughWeight} onChange={e => setR({ ...r, doughWeight: Number(e.target.value) })} /></Field><Field label="Finished weight (g)"><Input type="number" value={r.finishedWeight} onChange={e => setR({ ...r, finishedWeight: Number(e.target.value) })} /></Field><div /></div><div className="overflow-x-auto rounded-lg border"><table className="w-full min-w-[560px] text-left text-sm"><thead className="bg-muted text-xs text-muted-foreground"><tr><th className="px-3 py-2">Ingredient</th><th className="w-28">Quantity</th><th className="w-24">Unit</th><th className="w-28 text-right">Row cost</th><th className="w-12" /></tr></thead><tbody className="divide-y">{r.ingredients.map((row, index) => { const linked = ingredients.find(x => x.id === row.ingredientId) || null; const line = costOfRow(row, ingredients); const link = (nextId: string) => { const next = ingredients.find(x => x.id === nextId); setR(x => ({ ...x, ingredients: x.ingredients.map(old => old === row ? { ...old, ingredientId: nextId, unit: next ? next.unit : old.unit } : old) })); }; return <tr key={`${row.ingredientId}-${index}`}><td className="px-3 py-2"><Select value={row.ingredientId} onChange={e => link(e.target.value)}>{!linked && <option value={row.ingredientId}>{row.ingredientId} — not in pantry</option>}{ingredients.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}</Select>{!linked && <p className="mt-1 text-[10px] font-medium text-destructive">Link this row to a pantry item to cost it.</p>}</td><td><Input type="number" value={row.quantity} onChange={e => updateRow(index, 'quantity', Number(e.target.value))} /></td><td><Select value={row.unit} onChange={e => updateRow(index, 'unit', e.target.value)}>{!(UNIT_OPTIONS as readonly string[]).includes(row.unit) && <option value={row.unit}>{row.unit}</option>}{UNIT_OPTIONS.map(u => <option key={u} value={u}>{u}</option>)}</Select></td><td className="mono py-2 text-right text-xs">{line.cost !== null ? money(line.cost) : <span className="text-destructive">{line.issue === 'unpriced' ? 'no price' : line.issue === 'unconvertible' ? 'unit fix' : '—'}</span>}</td><td><IconButton label="Remove ingredient" onClick={() => setR(x => ({ ...x, ingredients: x.ingredients.filter((_, i) => i !== index) }))}><Trash2 size={15} /></IconButton></td></tr>; })}</tbody></table></div><Button type="button" variant="soft" className="mt-3" onClick={() => setR(x => ({ ...x, ingredients: [...x.ingredients, { ingredientId: ingredients[0]?.id || '', quantity: 0, unit: 'g', notes: '' }] }))}><Plus size={15} /> Add ingredient</Button></div><div className="flex justify-end gap-2 pt-2"><Button type="button" variant="ghost" onClick={onClose}>Cancel</Button><Button type="submit"><Check size={16} /> Save recipe</Button></div></form></Modal>;
+  const handleNameChange = (name: string) => {
+    set('name', name);
+    // Auto-populate prices based on recipe name if prices are currently 0
+    if (!value.retailPriceDozen && !value.wholesalePriceDozen) {
+      const defaultPrices = getDefaultPrices(name);
+      setR(x => ({ ...x, retailPriceDozen: defaultPrices.retail, wholesalePriceDozen: defaultPrices.wholesale }));
+    }
+  };
+  return <Modal title={value.name ? 'Edit recipe' : 'New recipe'} subtitle="Product details, pricing, and ingredient allocations in one place." onClose={onClose} wide><form onSubmit={e => { e.preventDefault(); onSave(r); }} className="space-y-5"><div className="grid gap-4 sm:grid-cols-2"><Field label="Recipe name"><Input required value={r.name} onChange={e => handleNameChange(e.target.value)} placeholder="e.g. Oat & Raisin Cookies" /></Field><Field label="Category"><Input value={r.category} onChange={e => set('category', e.target.value)} placeholder="e.g. Cookies" /></Field><Field label="Retail price / dozen" hint={r.retailPriceDozen ? `E${(r.retailPriceDozen / UNITS_PER_DOZEN).toFixed(2)} per item` : 'Auto-set from recipe name'}><Input type="number" min="0" step=".01" value={r.retailPriceDozen} onChange={e => set('retailPriceDozen', Number(e.target.value))} /></Field><Field label="Wholesale price / dozen" hint={r.wholesalePriceDozen ? `E${(r.wholesalePriceDozen / UNITS_PER_DOZEN).toFixed(2)} per item` : 'Auto-set from recipe name'}><Input type="number" min="0" step=".01" value={r.wholesalePriceDozen} onChange={e => set('wholesalePriceDozen', Number(e.target.value))} /></Field><Field label="Batch yield (per recipe)"><Input type="number" min="1" value={r.batchYield} onChange={e => set('batchYield', Number(e.target.value))} /></Field><Field label="Serving size"><Input value={r.servingSize} onChange={e => set('servingSize', e.target.value)} /></Field><Field label="Oven temperature" hint="e.g. 170-180°C"><Input value={r.ovenTemp || ''} onChange={e => set('ovenTemp', e.target.value)} placeholder="170-180°C" /></Field><Field label="Bake time (minutes)" hint="Per tray in the oven"><Input type="number" min="0" value={r.bakeTimeMinutes || ''} onChange={e => set('bakeTimeMinutes', Number(e.target.value))} placeholder="14" /></Field></div><Field label="Description"><textarea className="min-h-16 w-full rounded-lg border bg-background p-3 text-sm outline-none focus:border-primary" value={r.description} onChange={e => set('description', e.target.value)} placeholder="Brief description of this recipe" /></Field><div className="border-t pt-4"><p className="text-sm font-semibold mb-3">Ingredients</p><div className="mb-5 grid gap-4 sm:grid-cols-3"><Field label="Dough weight (g)"><Input type="number" value={r.doughWeight} onChange={e => setR({ ...r, doughWeight: Number(e.target.value) })} /></Field><Field label="Finished weight (g)"><Input type="number" value={r.finishedWeight} onChange={e => setR({ ...r, finishedWeight: Number(e.target.value) })} /></Field><div /></div><div className="overflow-x-auto rounded-lg border"><table className="w-full min-w-[560px] text-left text-sm"><thead className="bg-muted text-xs text-muted-foreground"><tr><th className="px-3 py-2">Ingredient</th><th className="w-28">Quantity</th><th className="w-24">Unit</th><th className="w-28 text-right">Row cost</th><th className="w-12" /></tr></thead><tbody className="divide-y">{r.ingredients.map((row, index) => { const linked = ingredients.find(x => x.id === row.ingredientId) || null; const line = costOfRow(row, ingredients); const link = (nextId: string) => { const next = ingredients.find(x => x.id === nextId); setR(x => ({ ...x, ingredients: x.ingredients.map(old => old === row ? { ...old, ingredientId: nextId, unit: next ? next.unit : old.unit } : old) })); }; return <tr key={`${row.ingredientId}-${index}`}><td className="px-3 py-2"><Select value={row.ingredientId} onChange={e => link(e.target.value)}>{!linked && <option value={row.ingredientId}>{row.ingredientId} — not in pantry</option>}{ingredients.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}</Select>{!linked && <p className="mt-1 text-[10px] font-medium text-destructive">Link this row to a pantry item to cost it.</p>}</td><td><Input type="number" value={row.quantity} onChange={e => updateRow(index, 'quantity', Number(e.target.value))} /></td><td><Select value={row.unit} onChange={e => updateRow(index, 'unit', e.target.value)}>{!(UNIT_OPTIONS as readonly string[]).includes(row.unit) && <option value={row.unit}>{row.unit}</option>}{UNIT_OPTIONS.map(u => <option key={u} value={u}>{u}</option>)}</Select></td><td className="mono py-2 text-right text-xs">{line.cost !== null ? money(line.cost) : <span className="text-destructive">{line.issue === 'unpriced' ? 'no price' : line.issue === 'unconvertible' ? 'unit fix' : '—'}</span>}</td><td><IconButton label="Remove ingredient" onClick={() => setR(x => ({ ...x, ingredients: x.ingredients.filter((_, i) => i !== index) }))}><Trash2 size={15} /></IconButton></td></tr>; })}</tbody></table></div><Button type="button" variant="soft" className="mt-3" onClick={() => setR(x => ({ ...x, ingredients: [...x.ingredients, { ingredientId: ingredients[0]?.id || '', quantity: 0, unit: 'g', notes: '' }] }))}><Plus size={15} /> Add ingredient</Button></div><div className="flex justify-end gap-2 pt-2"><Button type="button" variant="ghost" onClick={onClose}>Cancel</Button><Button type="submit"><Check size={16} /> Save recipe</Button></div></form></Modal>;
 }
 
 function RecipeVersionHistory({ recipe, onClose, onRevert }: { recipe: Recipe; onClose: () => void; onRevert: (version: RecipeVersion) => void }) {
@@ -611,7 +957,7 @@ function TemplateEditorModal({ value, store, onClose, onSave }: {
     const recipe = store.recipes.find(r => r.id === productId);
     if (!recipe) return;
     const qty = Math.max(1, Number(quantity) || 1);
-    setItems(prev => [...prev, { productId: recipe.id, quantity: qty, unitPrice: recipe.retailPriceDozen, costSnapshot: roundCurrency(costPerDozen(recipe, store.ingredients)) }]);
+    setItems(prev => [...prev, { productId: recipe.id, quantity: qty, unitPrice: roundCurrency(recipe.retailPriceDozen / UNITS_PER_DOZEN), costSnapshot: roundCurrency(costPerUnit(recipe, store.ingredients)) }]);
     setQuantity('1');
   };
   const removeItem = (idx: number) => setItems(prev => prev.filter((_, i) => i !== idx));
@@ -750,7 +1096,7 @@ function Orders() {
   const paid = active.filter(o => isPaid(o));
   const displayOrders = filter === 'all' ? active : filter === 'unpaid' ? unpaid : filter === 'paid' ? paid : archived;
   const counts = { all: active.length, unpaid: unpaid.length, paid: paid.length, archived: archived.length };
-  const newOrder = () => setEdit({ id: id('order'), invoiceNumber: formatInvoiceNumber(getNextInvoiceNumber(store)), orderNumber: '', customerName: '', customerAddress: '', customerCity: '', phone: '', orderDate: today(), dueDate: today(), salesRep: '', code: '', fob: '', taxRate: 0, items: [{ productId: store.recipes[0]?.id || '', quantity: 1, unitPrice: store.recipes[0]?.retailPriceDozen || 0, costSnapshot: 0 }], discount: 0, deliveryFee: 0, paymentStatus: 'Unpaid', paymentMethod: 'Cash', amountPaid: 0, payments: [], notes: '', createdAt: new Date().toISOString(), priority: 'Normal' });
+  const newOrder = () => setEdit({ id: id('order'), invoiceNumber: formatInvoiceNumber(getNextInvoiceNumber(store)), orderNumber: '', customerName: '', customerAddress: '', customerCity: '', phone: '', orderDate: today(), dueDate: today(), salesRep: '', code: '', fob: '', taxRate: 0, items: [{ productId: store.recipes[0]?.id || '', quantity: 1, unitPrice: roundCurrency((store.recipes[0]?.retailPriceDozen || 0) / UNITS_PER_DOZEN), costSnapshot: 0 }], discount: 0, deliveryFee: 0, paymentStatus: 'Unpaid', paymentMethod: 'Cash', amountPaid: 0, payments: [], notes: '', createdAt: new Date().toISOString(), priority: 'Normal' });
   useEffect(() => { const params = new URLSearchParams(urlSearch); if (params.get('new') === '1') { newOrder(); clearSearchParam('new'); } const invoiceId = params.get('invoice'); if (invoiceId) { const selected = store.orders.find(order => order.id === invoiceId); if (selected) setInvoice(selected); clearSearchParam('invoice'); } }, [location, urlSearch]);
   const saveOrder = (order: Order) => { const exists = store.orders.some(x => x.id === order.id); const existingClient = store.clients.find(c => c.name.toLowerCase() === order.customerName.toLowerCase()); const newClient = !exists && order.customerName && !existingClient ? { id: id('cli'), name: order.customerName, address: order.customerAddress, city: order.customerCity, phone: order.phone, email: '', notes: '', createdAt: new Date().toISOString() } : null; const held = upsertReservation(reservations, order, store.recipes, store.ingredients); const short = preBakePlan(order, store.ingredients, store.recipes, reservations).shortageCount; update({ orders: exists ? store.orders.map(x => x.id === order.id ? order : x) : [order, ...store.orders], reservations: held, clients: newClient ? [newClient, ...store.clients] : store.clients, settings: { ...store.settings, nextInvoiceNumber: exists ? store.settings.nextInvoiceNumber : getNextInvoiceNumber(store) + 1 }, auditLog: [createAuditEntry('Orders', exists ? 'updated' : 'created', order.id, order.customerName, `${exists ? 'Updated' : 'Created'} order ${order.invoiceNumber} for ${order.customerName}${short > 0 ? ` — ${short} ingredient(s) short on hand` : ''}`), ...store.auditLog], notifications: [createNotification(`Order ${exists ? 'updated' : 'created'}`, `${order.invoiceNumber} — ${order.customerName} was ${exists ? 'updated' : 'created'}${short > 0 ? `. ${short} ingredient(s) need restocking before baking.` : '. Ingredients reserved.'}`, 'Orders', order.id), ...store.notifications] }); setEdit(null); };
   const renderOrderRow = (o: Order, opts?: { showArchive?: boolean; showUnarchive?: boolean }) => {
@@ -929,7 +1275,7 @@ function Orders() {
         {bakingReport && <BakingReport order={bakingReport} store={store} onClose={() => setBakingReport(null)} />}
         {kitchenOrder && <KitchenOrder order={kitchenOrder} store={store} onClose={() => setKitchenOrder(null)} />}
         {showImport && <ExcelImportModal store={store} update={update} onClose={() => setShowImport(false)} />}
-        {showOrderForm && createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && setShowOrderForm(false)}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Kitchen order form</p><h2 className="display text-2xl font-semibold">Blank Template</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={() => setShowOrderForm(false)}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Kitchen Order Form", { landscape: true })} title="Tip: In the print dialog, disable Headers and footers for a clean print"><FileText size={16} /> Print order form</Button></div></div><KitchenOrderFormDocument numberOfSlots={4} /></div></div>, document.body)}
+        {showOrderForm && createPortal(<div className="print-portal fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && setShowOrderForm(false)}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Kitchen order form</p><h2 className="display text-2xl font-semibold">Blank Template</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={() => setShowOrderForm(false)}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Kitchen Order Form", { landscape: true })} title="Tip: In the print dialog, disable Headers and footers for a clean print"><FileText size={16} /> Print order form</Button></div></div><KitchenOrderFormDocument numberOfSlots={4} /></div></div>, document.body)}
         {showTemplates && <TemplateModal templates={loadTemplates()} onClose={() => setShowTemplates(false)} onApply={applyTemplate} onDelete={deleteTemplate} onSave={setTemplateModal} />}
         {templateModal && <TemplateEditorModal value={templateModal} store={store} onClose={() => setTemplateModal(null)} onSave={saveAsTemplate} />}
       </div>
@@ -985,15 +1331,15 @@ function Orders() {
       {showImport && <ExcelImportModal store={store} update={update} onClose={() => setShowImport(false)} />}
       {showTemplates && <TemplateModal templates={loadTemplates()} onClose={() => setShowTemplates(false)} onApply={applyTemplate} onDelete={deleteTemplate} onSave={setTemplateModal} />}
       {templateModal && <TemplateEditorModal value={templateModal} store={store} onClose={() => setTemplateModal(null)} onSave={saveAsTemplate} />}
-      {showOrderForm && createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && setShowOrderForm(false)}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Kitchen order form</p><h2 className="display text-2xl font-semibold">Blank Template</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={() => setShowOrderForm(false)}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Kitchen Order Form", { landscape: true })} title="Tip: In the print dialog, disable Headers and footers for a clean print"><FileText size={16} /> Print order form</Button></div></div><KitchenOrderFormDocument numberOfSlots={4} /></div></div>, document.body)}
+      {showOrderForm && createPortal(<div className="print-portal fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && setShowOrderForm(false)}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Kitchen order form</p><h2 className="display text-2xl font-semibold">Blank Template</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={() => setShowOrderForm(false)}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Kitchen Order Form", { landscape: true })} title="Tip: In the print dialog, disable Headers and footers for a clean print"><FileText size={16} /> Print order form</Button></div></div><KitchenOrderFormDocument numberOfSlots={4} /></div></div>, document.body)}
     </div>
   );
 }
 function BakingReport({ order, store, onClose }: { order: Order; store: Store; onClose: () => void }) {
-  return createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Baking report</p><h2 className="display text-2xl font-semibold">{order.invoiceNumber}</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={onClose}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Baking Report - " + order.invoiceNumber)}><FileText size={16} /> Print or save PDF</Button></div></div><BakingReportDocument order={order} store={store} /></div></div>, document.body);
+  return createPortal(<div className="print-portal fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Baking report</p><h2 className="display text-2xl font-semibold">{order.invoiceNumber}</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={onClose}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Baking Report - " + order.invoiceNumber)}><FileText size={16} /> Print or save PDF</Button></div></div><BakingReportDocument order={order} store={store} /></div></div>, document.body);
 }
 function KitchenOrder({ order, store, onClose }: { order: Order; store: Store; onClose: () => void }) {
-  return createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Kitchen order</p><h2 className="display text-2xl font-semibold">{order.invoiceNumber}</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={onClose}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Kitchen Order - " + order.invoiceNumber)}><FileText size={16} /> Print for kitchen</Button></div></div><KitchenOrderDocument order={order} store={store} /></div></div>, document.body);
+  return createPortal(<div className="print-portal fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Kitchen order</p><h2 className="display text-2xl font-semibold">{order.invoiceNumber}</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={onClose}>Close</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Kitchen Order - " + order.invoiceNumber)}><FileText size={16} /> Print for kitchen</Button></div></div><KitchenOrderDocument order={order} store={store} /></div></div>, document.body);
 }
 function PreBakeCheck({ plan, hold, isNew }: { plan: PreBakePlan; hold?: MaterialReservation; isNew: boolean }) {
   const [open, setOpen] = useState(true);
@@ -1075,12 +1421,11 @@ function OrderModal({ value, store, onClose, onSave }: { value: Order; store: St
   const [pasteText, setPasteText] = useState('');
   const [showPaste, setShowPaste] = useState(!value.customerName);
   const [expandedItem, setExpandedItem] = useState<number | null>(0);
-  const total = calculateOrderTotal(o.items, o.discount, o.deliveryFee, o.taxRate || 0);
   const set = (k: keyof Order, v: string | number) => setO(x => ({ ...x, [k]: v }));
-  const snapshot = (item: Order['items'][number]) => { const r = store.recipes.find(x => x.id === item.productId); return r ? roundCurrency(costPerDozen(r, store.ingredients)) : item.costSnapshot; };
+  const snapshot = (item: Order['items'][number]) => { const r = store.recipes.find(x => x.id === item.productId); return r ? roundCurrency(costPerUnit(r, store.ingredients)) : item.costSnapshot; };
   const updateItem = (idx: number, key: string, val: string | number) => setO(x => ({ ...x, items: x.items.map((row, i) => i === idx ? { ...row, [key]: val } : row) }));
-  const handlePasteParse = () => { if (!pasteText.trim()) return; const parsed = parseOrderText(pasteText, store.recipes); setO(current => ({ ...current, customerName: parsed.customerName || current.customerName, items: parsed.items.map(i => ({ ...i, costSnapshot: (() => { const r = store.recipes.find(x => x.id === i.productId); return r ? roundCurrency(costPerDozen(r, store.ingredients)) : 0; })() })), dueDate: parsed.dueDate || current.dueDate, notes: parsed.notes || current.notes })); setShowPaste(false); setPasteText(''); };
-  const addItem = () => { setO(x => ({ ...x, items: [...x.items, { productId: store.recipes[0]?.id || '', quantity: 1, unitPrice: store.recipes[0]?.retailPriceDozen || 0, costSnapshot: 0 }] })); setExpandedItem(o.items.length); };
+  const handlePasteParse = () => { if (!pasteText.trim()) return; const parsed = parseOrderText(pasteText, store.recipes); setO(current => ({ ...current, customerName: parsed.customerName || current.customerName, items: parsed.items.map(i => ({ ...i, costSnapshot: (() => { const r = store.recipes.find(x => x.id === i.productId); return r ? roundCurrency(costPerUnit(r, store.ingredients)) : 0; })() })), dueDate: parsed.dueDate || current.dueDate, notes: parsed.notes || current.notes })); setShowPaste(false); setPasteText(''); };
+  const addItem = () => { const firstRecipe = store.recipes[0]; setO(x => ({ ...x, items: [...x.items, { productId: firstRecipe?.id || '', quantity: 1, unitPrice: roundCurrency((firstRecipe?.retailPriceDozen || 0) / UNITS_PER_DOZEN), costSnapshot: firstRecipe ? roundCurrency(costPerUnit(firstRecipe, store.ingredients)) : 0 }] })); setExpandedItem(o.items.length); };
   const plan = preBakePlan(o, store.ingredients, store.recipes, store.reservations);
   const hold = reservationForOrder(store.reservations, value.id);
   return (
@@ -1120,7 +1465,7 @@ function OrderModal({ value, store, onClose, onSave }: { value: Order; store: St
           )}
           <Field label="Customer name"><Input required value={o.customerName} onChange={e => set('customerName', e.target.value)} /></Field>
           <Field label="Phone"><Input value={o.phone} onChange={e => set('phone', e.target.value)} /></Field>
-          <Field label="Order number"><Input value={o.orderNumber} onChange={e => set('orderNumber', e.target.value)} /></Field>
+          <Field label="Invoice number"><Input value={o.invoiceNumber} readOnly className="cursor-default select-all bg-muted/50 font-mono" title="Invoice number is automatically assigned" /></Field>
           <Field label="Order date"><Input type="date" value={o.orderDate} onChange={e => set('orderDate', e.target.value)} /></Field>
           <Field label="Due date"><Input type="date" value={o.dueDate} onChange={e => set('dueDate', e.target.value)} /></Field>
           <Field label="Payment status"><Select value={o.paymentStatus} onChange={e => set('paymentStatus', e.target.value)}><option>Unpaid</option><option>Deposit Paid</option><option>Partially Paid</option><option>Paid</option></Select></Field>
@@ -1145,20 +1490,24 @@ function OrderModal({ value, store, onClose, onSave }: { value: Order; store: St
                       <p className="text-[10px] text-muted-foreground">{item.quantity} × {money(item.unitPrice)} = {money(itemTotal)}</p>
                     </div>
                     <div className="flex items-center gap-1">
-                      <Button type="button" variant="ghost" className="h-7 w-7 p-0" onClick={(e) => { e.stopPropagation(); setO(x => ({ ...x, items: x.items.filter((_, i) => i !== idx) })); }}><Trash2 size={14} className="text-muted-foreground" /></Button>
+                      <Button type="button" variant="danger" className="h-7 w-7 p-0 px-2" onClick={(e) => { e.stopPropagation(); setO(x => ({ ...x, items: x.items.filter((_, i) => i !== idx) })); }}><Trash2 size={14} /></Button>
                       <ChevronDown size={16} className={cx('text-muted-foreground transition-transform', isExpanded && 'rotate-180')} />
                     </div>
                   </div>
                   {isExpanded && (
                     <div className="border-t bg-muted/20 p-4 space-y-3">
                       <Field label="Product">
-                        <Select value={item.productId} onChange={e => updateItem(idx, 'productId', e.target.value)}>
+                        <Select value={item.productId} onChange={e => {
+                          const recipe = store.recipes.find(r => r.id === e.target.value);
+                          const autoPrice = recipe ? roundCurrency(recipe.retailPriceDozen / UNITS_PER_DOZEN) : item.unitPrice;
+                          setO(x => ({ ...x, items: x.items.map((row, i) => i === idx ? { ...row, productId: e.target.value, unitPrice: autoPrice } : row) }));
+                        }}>
                           {store.recipes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                         </Select>
                       </Field>
                       <div className="grid gap-3 sm:grid-cols-2">
-                        <Field label="Quantity"><Input type="number" min="1" value={item.quantity} onChange={e => updateItem(idx, 'quantity', Number(e.target.value))} /></Field>
-                        <Field label="Unit price"><Input type="number" min="0" step=".01" value={item.unitPrice} onChange={e => updateItem(idx, 'unitPrice', Number(e.target.value))} /></Field>
+                        <Field label="Quantity"><Input type="number" min="0" step="0.01" value={item.quantity} onChange={e => updateItem(idx, 'quantity', Number(e.target.value))} /></Field>
+                        <Field label="Unit price (auto)" hint="Set from recipe retail price"><Input type="text" value={money(item.unitPrice)} readOnly className="cursor-default bg-muted/50 font-mono text-sm" /></Field>
                       </div>
                     </div>
                   )}
@@ -1168,11 +1517,6 @@ function OrderModal({ value, store, onClose, onSave }: { value: Order; store: St
           </div>
         </div>
         <PreBakeCheck plan={plan} hold={hold} isNew={!value.customerName} />
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Field label="Discount"><Input type="number" min="0" step=".01" value={o.discount} onChange={e => set('discount', Number(e.target.value))} /></Field>
-          <Field label="Delivery fee"><Input type="number" min="0" step=".01" value={o.deliveryFee} onChange={e => set('deliveryFee', Number(e.target.value))} /></Field>
-          <Field label="Amount paid"><Input type="number" min="0" step=".01" value={o.amountPaid} onChange={e => set('amountPaid', Number(e.target.value))} /></Field>
-        </div>
         <div className="mt-4 rounded-lg border border-dashed p-3">
           <label className="flex cursor-pointer items-center gap-2.5">
             <input type="checkbox" checked={!!o.excludeFromRevenue} onChange={e => setO(x => ({ ...x, excludeFromRevenue: e.target.checked }))} className="h-4 w-4 rounded border-input" />
@@ -1189,7 +1533,7 @@ function OrderModal({ value, store, onClose, onSave }: { value: Order; store: St
   );
 }
 function InvoicePreview({ order, store, onClose, onEdit, onBakingReport, onKitchenOrder, onToggleExclude }: { order: Order; store: Store; onClose: () => void; onEdit?: (o: Order) => void; onBakingReport?: (o: Order) => void; onKitchenOrder?: (o: Order) => void; onToggleExclude?: (o: Order) => void }) {
-  return createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Print preview</p><h2 className="display text-2xl font-semibold">{order.invoiceNumber}</h2>{order.excludeFromRevenue && <span className="mt-1 inline-block rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-semibold text-destructive">Excluded from revenue — stock unchanged</span>}</div><div className="flex flex-wrap gap-2"><Button variant="ghost" onClick={onClose}>Close preview</Button>{onEdit && <Button variant="soft" onClick={() => onEdit(order)}><Pencil size={16} /> Edit order</Button>}{onToggleExclude && <Button variant="soft" onClick={() => onToggleExclude(order)} title={order.excludeFromRevenue ? 'This receipt will count toward revenue again' : 'Disconnect this receipt from revenue, reports and analytics. Stock stays unchanged.'}><EyeOff size={16} /> {order.excludeFromRevenue ? 'Include in revenue' : 'Exclude from revenue'}</Button>}{onBakingReport && <Button variant="soft" onClick={() => onBakingReport(order)}><BookOpen size={16} /> Baking report</Button>}{onKitchenOrder && <Button variant="soft" onClick={() => onKitchenOrder(order)}><ClipboardList size={16} /> Kitchen order</Button>}<Button onClick={() => printWithTitle("Little Bliss Bakery - Invoice - " + order.invoiceNumber)}><FileText size={16} /> Print or save PDF</Button></div></div><InvoiceDocument order={order} recipes={store.recipes} settings={store.settings} /></div></div>, document.body);
+  return createPortal(<div className="print-portal fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Print preview</p><h2 className="display text-2xl font-semibold">{order.invoiceNumber}</h2>{order.excludeFromRevenue && <span className="mt-1 inline-block rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-semibold text-destructive">Excluded from revenue — stock unchanged</span>}</div><div className="flex flex-wrap gap-2"><Button variant="ghost" onClick={onClose}>Close preview</Button>{onEdit && <Button variant="soft" onClick={() => onEdit(order)}><Pencil size={16} /> Edit order</Button>}{onToggleExclude && <Button variant="soft" onClick={() => onToggleExclude(order)} title={order.excludeFromRevenue ? 'This receipt will count toward revenue again' : 'Disconnect this receipt from revenue, reports and analytics. Stock stays unchanged.'}><EyeOff size={16} /> {order.excludeFromRevenue ? 'Include in revenue' : 'Exclude from revenue'}</Button>}{onBakingReport && <Button variant="soft" onClick={() => onBakingReport(order)}><BookOpen size={16} /> Baking report</Button>}{onKitchenOrder && <Button variant="soft" onClick={() => onKitchenOrder(order)}><ClipboardList size={16} /> Kitchen order</Button>}<Button onClick={() => printWithTitle("Little Bliss Bakery - Invoice - " + order.invoiceNumber)}><FileText size={16} /> Print or save PDF</Button></div></div><InvoiceDocument order={order} recipes={store.recipes} settings={store.settings} /></div></div>, document.body);
 }
 
 function ShoppingListModal({ store, onClose }: { store: Store; onClose: () => void }) {
@@ -1197,7 +1541,7 @@ function ShoppingListModal({ store, onClose }: { store: Store; onClose: () => vo
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [boughtBy, setBoughtBy] = useState('');
   
-  return createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Print preview</p><h2 className="display text-2xl font-semibold">Shopping List</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={onClose}>Close preview</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Shopping List")}><FileText size={16} /> Print or save PDF</Button></div></div><div className="no-print mb-4 flex items-center gap-4 p-4 bg-muted/50 rounded-lg"><span className="text-sm font-medium">Mode:</span><div className="flex gap-2"><button onClick={() => setMode('blank')} className={cx('px-3 py-1.5 rounded-lg text-xs font-semibold', mode === 'blank' ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted')}>Blank template</button><button onClick={() => setMode('low-stock')} className={cx('px-3 py-1.5 rounded-lg text-xs font-semibold', mode === 'low-stock' ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted')}>Low stock only</button><button onClick={() => setMode('all')} className={cx('px-3 py-1.5 rounded-lg text-xs font-semibold', mode === 'all' ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted')}>All ingredients</button></div></div><div className="no-print mb-4 grid gap-4 sm:grid-cols-2"><Field label="Date"><Input type="date" value={date} onChange={e => setDate(e.target.value)} /></Field><Field label="Bought by"><Input value={boughtBy} onChange={e => setBoughtBy(e.target.value)} placeholder="Name" /></Field></div><ShoppingListDocument ingredients={store.ingredients} settings={store.settings} mode={mode} date={date} boughtBy={boughtBy} /></div></div>, document.body);
+  return createPortal(<div className="print-portal fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Print preview</p><h2 className="display text-2xl font-semibold">Shopping List</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={onClose}>Close preview</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Shopping List")}><FileText size={16} /> Print or save PDF</Button></div></div><div className="no-print mb-4 flex items-center gap-4 p-4 bg-muted/50 rounded-lg"><span className="text-sm font-medium">Mode:</span><div className="flex gap-2"><button onClick={() => setMode('blank')} className={cx('px-3 py-1.5 rounded-lg text-xs font-semibold', mode === 'blank' ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted')}>Blank template</button><button onClick={() => setMode('low-stock')} className={cx('px-3 py-1.5 rounded-lg text-xs font-semibold', mode === 'low-stock' ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted')}>Low stock only</button><button onClick={() => setMode('all')} className={cx('px-3 py-1.5 rounded-lg text-xs font-semibold', mode === 'all' ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted')}>All ingredients</button></div></div><div className="no-print mb-4 grid gap-4 sm:grid-cols-2"><Field label="Date"><Input type="date" value={date} onChange={e => setDate(e.target.value)} /></Field><Field label="Bought by"><Input value={boughtBy} onChange={e => setBoughtBy(e.target.value)} placeholder="Name" /></Field></div><ShoppingListDocument ingredients={store.ingredients} settings={store.settings} mode={mode} date={date} boughtBy={boughtBy} /></div></div>, document.body);
 }
 
 function StockCheckSheetModal({ store, onClose }: { store: Store; onClose: () => void }) {
@@ -1207,7 +1551,7 @@ function StockCheckSheetModal({ store, onClose }: { store: Store; onClose: () =>
   const [sheetNumber, setSheetNumber] = useState('');
   const [checkedBy, setCheckedBy] = useState('');
   
-  return createPortal(<div className="fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Print preview</p><h2 className="display text-2xl font-semibold">Stock Check Sheet</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={onClose}>Close preview</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Stock Check Sheet")}><FileText size={16} /> Print or save PDF</Button></div></div><div className="no-print mb-4 flex items-center gap-4 p-4 bg-muted/50 rounded-lg"><span className="text-sm font-medium">Mode:</span><div className="flex gap-2"><button onClick={() => setMode('blank')} className={cx('px-3 py-1.5 rounded-lg text-xs font-semibold', mode === 'blank' ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted')}>Blank template</button><button onClick={() => setMode('low-stock')} className={cx('px-3 py-1.5 rounded-lg text-xs font-semibold', mode === 'low-stock' ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted')}>Low stock only</button><button onClick={() => setMode('all')} className={cx('px-3 py-1.5 rounded-lg text-xs font-semibold', mode === 'all' ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted')}>All ingredients</button></div></div><div className="no-print mb-4 grid gap-4 sm:grid-cols-2"><Field label="Date"><Input type="date" value={date} onChange={e => setDate(e.target.value)} /></Field><Field label="Baker"><Input value={baker} onChange={e => setBaker(e.target.value)} placeholder="Name" /></Field><Field label="Sheet No."><Input value={sheetNumber} onChange={e => setSheetNumber(e.target.value)} placeholder="#" /></Field><Field label="Checked by"><Input value={checkedBy} onChange={e => setCheckedBy(e.target.value)} placeholder="Name" /></Field></div><StockCheckSheetDocument ingredients={store.ingredients} recipes={store.recipes} settings={store.settings} mode={mode} date={date} baker={baker} sheetNumber={sheetNumber} checkedBy={checkedBy} /></div></div>, document.body);
+  return createPortal(<div className="print-portal fixed inset-0 z-[9999] overflow-auto bg-foreground/35 p-0 backdrop-blur-[2px] sm:p-6" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}><div className="mx-auto min-h-full w-full max-w-4xl bg-background p-4 shadow-2xl sm:min-h-0 sm:rounded-2xl sm:p-6"><div className="no-print mb-4 flex items-center justify-between gap-3"><div><p className="mono text-[10px] font-semibold uppercase tracking-[.18em] text-primary">Print preview</p><h2 className="display text-2xl font-semibold">Stock Check Sheet</h2></div><div className="flex gap-2"><Button variant="ghost" onClick={onClose}>Close preview</Button><Button onClick={() => printWithTitle("Little Bliss Bakery - Stock Check Sheet")}><FileText size={16} /> Print or save PDF</Button></div></div><div className="no-print mb-4 flex items-center gap-4 p-4 bg-muted/50 rounded-lg"><span className="text-sm font-medium">Mode:</span><div className="flex gap-2"><button onClick={() => setMode('blank')} className={cx('px-3 py-1.5 rounded-lg text-xs font-semibold', mode === 'blank' ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted')}>Blank template</button><button onClick={() => setMode('low-stock')} className={cx('px-3 py-1.5 rounded-lg text-xs font-semibold', mode === 'low-stock' ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted')}>Low stock only</button><button onClick={() => setMode('all')} className={cx('px-3 py-1.5 rounded-lg text-xs font-semibold', mode === 'all' ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted')}>All ingredients</button></div></div><div className="no-print mb-4 grid gap-4 sm:grid-cols-2"><Field label="Date"><Input type="date" value={date} onChange={e => setDate(e.target.value)} /></Field><Field label="Baker"><Input value={baker} onChange={e => setBaker(e.target.value)} placeholder="Name" /></Field><Field label="Sheet No."><Input value={sheetNumber} onChange={e => setSheetNumber(e.target.value)} placeholder="#" /></Field><Field label="Checked by"><Input value={checkedBy} onChange={e => setCheckedBy(e.target.value)} placeholder="Name" /></Field></div><StockCheckSheetDocument ingredients={store.ingredients} recipes={store.recipes} settings={store.settings} mode={mode} date={date} baker={baker} sheetNumber={sheetNumber} checkedBy={checkedBy} /></div></div>, document.body);
 }
 
 function ExcelImportModal({ store, update, onClose }: { store: Store; update: (patch: Partial<Store>) => void; onClose: () => void }) {
@@ -1312,6 +1656,7 @@ function Inventory() {
   const [pinned, setPinned] = useState<Record<string, boolean>>(() => { try { const saved = localStorage.getItem('inventory-pinned'); return saved ? JSON.parse(saved) : {}; } catch { return {}; } });
   const [showShoppingList, setShowShoppingList] = useState(false);
   const [showStockCheck, setShowStockCheck] = useState(false);
+  const [showScan, setShowScan] = useState(false);
   const reservedByIngredient = useMemo(() => reservedQuantityByIngredient(store.reservations), [store.reservations]);
   const heldFor = (i: Ingredient) => reservedByIngredient[i.id] || 0;
   const heldCount = reservedBatchCount(store.reservations);
@@ -1320,6 +1665,27 @@ function Inventory() {
   const add = (type: string) => setEdit({ id: id('txn'), ingredientId: store.ingredients[0]?.id || '', type, quantity: 0, date: today(), note: '' });
   useEffect(() => { if (new URLSearchParams(urlSearch).get('new') === '1') { add('receive'); clearSearchParam('new'); } }, [location, urlSearch]);
   const save = (t: InventoryTransaction) => { const ingredient = store.ingredients.find(i => i.id === t.ingredientId); if (!ingredient) return; const newStock = t.type === 'set' ? Math.max(0, t.quantity) : Math.max(0, ingredient.currentStock + (t.type === 'waste' || t.type === 'use' ? -1 : 1) * t.quantity); const minStock = t.minimumStock !== undefined ? t.minimumStock : ingredient.minimumStock; update({ ingredients: store.ingredients.map(i => i.id === t.ingredientId ? { ...i, currentStock: newStock, minimumStock: minStock } : i), transactions: [t, ...store.transactions], auditLog: [createAuditEntry('Inventory', t.type, t.ingredientId, ingredient.name, t.type === 'set' ? `Set ${ingredient.name} stock to ${t.quantity} ${ingredient.unit}` : `${t.type} ${t.quantity} ${ingredient.unit} of ${ingredient.name}`), ...store.auditLog], notifications: [createNotification(`Stock ${t.type}`, t.type === 'set' ? `${ingredient.name} set to ${t.quantity} ${ingredient.unit}` : `${t.quantity} ${ingredient.unit} of ${ingredient.name} ${t.type === 'waste' ? 'wasted' : 'received'}`, 'Inventory', t.ingredientId), ...store.notifications] }); setEdit(null); };
+  // A receipt is the best source of both stock and price: it says how much
+  // arrived and what was actually paid. Stock is added, the pack price is
+  // recorded, and price history only grows when the unit cost really moved — so
+  // a supplier changing pack sizes doesn't read as inflation.
+  const applyReceipt = (result: { patches: Map<string, Ingredient>; stockAdded: number; priceChanges: { name: string; from: number; to: number }[] }) => {
+    const transactions: InventoryTransaction[] = [...result.patches.entries()].map(([ingredientId, next]) => ({
+      id: id('txn'), ingredientId, type: 'receive',
+      quantity: Math.round((next.currentStock - (store.ingredients.find(i => i.id === ingredientId)?.currentStock ?? 0)) * 1000) / 1000,
+      date: today(), note: 'Received from supplier receipt',
+    }));
+    const priceSummary = result.priceChanges.length
+      ? ` · ${result.priceChanges.map(c => `${c.name} ${money(c.from)}→${money(c.to)}`).join(', ')}`
+      : '';
+    update({
+      ingredients: store.ingredients.map(i => result.patches.get(i.id) ?? i),
+      transactions: [...transactions, ...store.transactions],
+      auditLog: [createAuditEntry('Inventory', 'receive', 'receipt', 'Supplier receipt', `Applied receipt: ${result.patches.size} ingredients, ${result.stockAdded} units received${priceSummary}`), ...store.auditLog],
+      notifications: [createNotification('Receipt applied', `${result.patches.size} ingredients added to stock${result.priceChanges.length ? `, ${result.priceChanges.length} price change(s) recorded` : ''}`, 'Inventory'), ...store.notifications],
+    });
+    setShowScan(false);
+  };
   const categories = [...new Set(store.ingredients.map(i => i.category))].sort();
   const filteredByCategory = categories.map(cat => {
     const items = store.ingredients.filter(i => i.category === cat && (i.name.toLowerCase().includes(search.toLowerCase()) || i.supplier.toLowerCase().includes(search.toLowerCase()) || cat.toLowerCase().includes(search.toLowerCase())));
@@ -1340,6 +1706,7 @@ function Inventory() {
         <div className="flex gap-2">
           <Button variant="soft" onClick={() => add('waste')} className="min-h-8 px-2.5 text-xs"><ArrowDownRight size={14} /> Waste</Button>
           <Button onClick={() => add('receive')} className="min-h-8 px-2.5 text-xs"><Plus size={14} /> Receive</Button>
+          <Button variant="ghost" onClick={() => setShowScan(true)} className="min-h-8 px-2.5 text-xs" aria-label="Scan a receipt"><ScanLine size={14} /> Scan</Button>
           <Button variant="ghost" onClick={() => setShowShoppingList(true)} className="min-h-8 px-2.5 text-xs"><FileText size={14} /></Button>
           <Button variant="ghost" onClick={() => setShowStockCheck(true)} className="min-h-8 px-2.5 text-xs"><ClipboardList size={14} /></Button>
         </div>
@@ -1396,6 +1763,7 @@ function Inventory() {
       {edit && <InventoryModal value={edit} ingredients={store.ingredients} onClose={() => setEdit(null)} onSave={save} />}
       {showShoppingList && <ShoppingListModal store={store} onClose={() => setShowShoppingList(false)} />}
       {showStockCheck && <StockCheckSheetModal store={store} onClose={() => setShowStockCheck(false)} />}
+      {showScan && <ReceiptScanModal ingredients={store.ingredients} onApply={applyReceipt} onClose={() => setShowScan(false)} money={money} />}
     </div>;
   }
   return <div>
@@ -1403,6 +1771,7 @@ function Inventory() {
       <div className="flex gap-2">
         <Button variant="soft" onClick={() => add('waste')}><ArrowDownRight size={16} /> Record waste</Button>
         <Button onClick={() => add('receive')}><Plus size={16} /> Receive stock</Button>
+        <Button variant="soft" onClick={() => setShowScan(true)} data-testid="button-scan-receipt"><ScanLine size={16} /> Scan receipt</Button>
         <Button variant="ghost" onClick={() => setShowShoppingList(true)}><FileText size={16} /> Shopping List</Button>
         <Button variant="ghost" onClick={() => setShowStockCheck(true)}><ClipboardList size={16} /> Stock Check</Button>
       </div>
@@ -1478,6 +1847,7 @@ function Inventory() {
     {edit && <InventoryModal value={edit} ingredients={store.ingredients} onClose={() => setEdit(null)} onSave={save} />}
     {showShoppingList && <ShoppingListModal store={store} onClose={() => setShowShoppingList(false)} />}
     {showStockCheck && <StockCheckSheetModal store={store} onClose={() => setShowStockCheck(false)} />}
+    {showScan && <ReceiptScanModal ingredients={store.ingredients} onApply={applyReceipt} onClose={() => setShowScan(false)} money={money} />}
   </div>;
 }
 function InventoryModal({ value, ingredients, onClose, onSave }: { value: InventoryTransaction; ingredients: Ingredient[]; onClose: () => void; onSave: (v: InventoryTransaction) => void }) {
@@ -1525,20 +1895,472 @@ function InventoryModal({ value, ingredients, onClose, onSave }: { value: Invent
   </Modal>;
 }
 
-function Reports() {
-  const { store } = useStore(); const isMobile = useIsMobile(); const [period, setPeriod] = useState<RevenuePeriod>('month');
-  const periodLabel = revenuePeriodLabel(period);
-  const revOrders = revenueOrders(store.orders, period);
-  const revExpenses = store.expenses.filter(e => inRevenuePeriod(e.date, period));
-  const revenue = revOrders.reduce((s, o) => s + o.items.reduce((a, i) => a + i.quantity * i.unitPrice, 0) - o.discount, 0);
-  const costs = revOrders.reduce((s, o) => s + calculateOrderCost(o.items), 0);
-  const expenses = revExpenses.reduce((s, e) => s + e.amount, 0);
-  const download = (filename: string, content: string) => { const blob = new Blob([content], { type: 'text/csv' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = filename; a.click(); URL.revokeObjectURL(url); };
-  if (isMobile) { return <div><div className="mb-4 flex items-center justify-between"><h1 className="display text-xl font-semibold">Reports</h1><Button variant="soft" onClick={() => download('little-bliss-orders.csv', `order,customer,total,status\n${store.orders.filter(o => !o.excludeFromRevenue).map(o => `${o.orderNumber},${o.customerName},${calculateOrderTotal(o.items, o.discount, o.deliveryFee, o.taxRate || 0)},${o.paymentStatus}`).join('\n')}`)}><Download size={14} /> CSV</Button></div><div className="mb-3 flex flex-wrap items-center gap-1 rounded-lg border bg-card p-1">{REVENUE_PERIODS.map(p => <button key={p.value} onClick={() => setPeriod(p.value)} className={cx('rounded-md px-2.5 py-1.5 text-[11px] font-semibold', period === p.value ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')}>{p.label}</button>)}</div><div className="grid grid-cols-2 gap-3 mb-4"><Card className="p-4"><p className="text-[10px] text-muted-foreground">Revenue</p><p className="mono mt-1 text-lg font-semibold">{money(revenue)}</p></Card><Card className="p-4"><p className="text-[10px] text-muted-foreground">Costs</p><p className="mono mt-1 text-lg font-semibold">{money(costs)}</p></Card><Card className="p-4"><p className="text-[10px] text-muted-foreground">Expenses</p><p className="mono mt-1 text-lg font-semibold">{money(expenses)}</p></Card><Card className="p-4"><p className="text-[10px] text-muted-foreground">Profit</p><p className={cx('mono mt-1 text-lg font-semibold', revenue - costs - expenses < 0 && 'text-destructive')}>{money(revenue - costs - expenses)}</p></Card></div><Card className="p-4"><h2 className="text-sm font-semibold mb-3">Top products</h2><div className="space-y-2.5">{store.recipes.map(p => { const units = revOrders.reduce((s, o) => s + o.items.filter(i => i.productId === p.id).reduce((a, i) => a + i.quantity, 0), 0); const val = revOrders.reduce((s, o) => s + o.items.filter(i => i.productId === p.id).reduce((a, i) => a + i.quantity * i.unitPrice, 0), 0); return <div key={p.id} className="flex items-center justify-between"><span className="text-sm">{p.name}</span><div className="text-right"><p className="mono text-xs font-semibold">{units} units</p><p className="text-[10px] text-muted-foreground">{money(val)}</p></div></div>; })}</div></Card></div>; }
-  return <div><PageHeader eyebrow="Numbers with context" title="Reports" description="A weekly rhythm for seeing what is working and what to change." action={<Button variant="soft" onClick={() => download('little-bliss-orders.csv', `order,customer,total,status\n${store.orders.filter(o => !o.excludeFromRevenue).map(o => `${o.orderNumber},${o.customerName},${calculateOrderTotal(o.items, o.discount, o.deliveryFee, o.taxRate || 0)},${o.paymentStatus}`).join('\n')}`)}><Download size={16} /> Export CSV</Button>} /><div className="mb-5 flex items-center gap-1 rounded-lg border bg-card p-1 w-fit">{REVENUE_PERIODS.map(p => <button key={p.value} data-testid={`button-period-${p.value}`} onClick={() => setPeriod(p.value)} className={cx('rounded-md px-3 py-1.5 text-xs font-semibold', period === p.value ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')}>{p.label}</button>)}</div><div className="grid gap-5 lg:grid-cols-[1.15fr_.85fr]"><Card className="p-5"><div className="flex items-start justify-between"><div><p className="text-xs text-muted-foreground">{periodLabel} revenue</p><p className="mono mt-2 text-3xl font-semibold">{money(revenue)}</p></div><span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-semibold text-secondary-foreground">{revOrders.length} order{revOrders.length !== 1 ? 's' : ''}</span></div></Card><Card className="p-5"><div className="mb-5 flex items-center justify-between"><div><h2 className="font-semibold">Profitability snapshot</h2><p className="text-xs text-muted-foreground">Estimated margin per product</p></div></div>                <div className="space-y-3">{store.recipes.map(p => { const c = costPerDozen(p, store.ingredients); const profit = roundCurrency(p.retailPriceDozen - c); return <div key={p.id} className="flex items-center justify-between"><div className="flex items-center gap-3"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-secondary text-[10px] font-bold text-secondary-foreground">{store.recipes.indexOf(p) + 1}</span><div><p className="text-sm font-semibold">{p.name}</p><p className="text-[10px] text-muted-foreground">cost {c ? money(c) : '—'}</p></div></div><div className="text-right"><p className="mono text-sm font-semibold text-primary">{c ? money(profit) : '—'}</p><p className="text-[10px] text-muted-foreground">{c ? `${Math.round((profit / p.retailPriceDozen) * 100)}% margin` : 'no cost data'}</p></div></div>; })}</div></Card></div></div>;
-}
-function ReportLine({ label, value, total, color }: { label: string; value: number; total: number; color: string }) { return <div><div className="mb-1.5 flex justify-between text-xs"><span>{label}</span><span className="mono">{money(value)}</span></div><div className="h-2 overflow-hidden rounded-full bg-muted"><div className={cx('h-full rounded-full', color)} style={{ width: `${Math.min(100, value / total * 100)}%` }} /></div></div>; }
+/* ─── REPORTS ───
+   One period selector, five views over the same period-scoped orders and
+   expenses. Every figure comes from periodScope()/periodTotals() in the store, so
+   the screen, the CSV and the printed PDF cannot disagree: each view builds its
+   rows once and both exports read those same rows. */
+type ReportTab = 'sales' | 'production' | 'inventory' | 'customers' | 'financial';
 
+const REPORT_TABS: { id: ReportTab; label: string; description: string }[] = [
+  { id: 'sales', label: 'Sales', description: 'What sold, to whom, and at what margin.' },
+  { id: 'production', label: 'Production', description: 'What to bake, and when it is due.' },
+  { id: 'inventory', label: 'Inventory', description: 'Stock value, shortages and ingredient usage.' },
+  { id: 'customers', label: 'Customers', description: 'Who buys, how often, and what they are worth.' },
+  { id: 'financial', label: 'Financial', description: 'Profit and loss, and where the money went.' },
+];
+
+/** A table that exists once and feeds the screen, the CSV and the PDF alike. */
+type ReportTable = {
+  heading: string;
+  note?: string;
+  columns: string[];
+  rows: (string | number)[][];
+  totals?: (string | number)[];
+  align?: ('left' | 'right')[];
+};
+
+const STOCK_STATUS_COPY: Record<string, string> = { out: 'Out of stock', low: 'Below minimum', watch: 'Near minimum', ok: 'In stock' };
+const num = (value: number) => value.toLocaleString('en-SZ', { maximumFractionDigits: 2 });
+
+function ReportKpiGrid({ kpis }: { kpis: ReportKpi[] }) {
+  const tones = ['primary', 'lime', 'peach', 'dark'];
+  const icons = [TrendingUp, Banknote, Receipt, Sparkles];
+  return (
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {kpis.map((kpi, index) => (
+        <Metric key={kpi.label} label={kpi.label} value={kpi.value} note={kpi.note || ''} icon={icons[index % icons.length]} tone={tones[index % tones.length]} />
+      ))}
+    </div>
+  );
+}
+
+/** A scrollable table that keeps its header aligned on a phone and prints as-is. */
+function ReportTablePanel({ table }: { table: ReportTable }) {
+  if (!table.rows.length) {
+    return (
+      <section className="overflow-hidden rounded-xl border bg-card shadow-sm">
+        <div className="border-b px-5 py-4">
+          <h2 className="font-semibold">{table.heading}</h2>
+          {table.note && <p className="mt-0.5 text-xs text-muted-foreground">{table.note}</p>}
+        </div>
+        <div className="px-5 py-10 text-center">
+          <p className="text-sm font-semibold">No data available for this period.</p>
+        </div>
+      </section>
+    );
+  }
+  return (
+    <section className="overflow-hidden rounded-xl border bg-card shadow-sm">
+      <div className="border-b px-5 py-4">
+        <h2 className="font-semibold">{table.heading}</h2>
+        {table.note && <p className="mt-0.5 text-xs text-muted-foreground">{table.note}</p>}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[720px] text-left text-sm">
+          <thead className="bg-muted/55 text-xs uppercase tracking-wider text-muted-foreground">
+            <tr>{table.columns.map((column, index) => <th key={column} className={cx('px-5 py-3.5', (table.align?.[index] || (index === 0 ? 'left' : 'right')) === 'right' && 'text-right')}>{column}</th>)}</tr>
+          </thead>
+          <tbody className="divide-y">
+            {table.rows.map((row, rowIndex) => (
+              <tr key={rowIndex} className="hover:bg-muted/25">
+                {row.map((cell, cellIndex) => (
+                  <td key={cellIndex} className={cx('px-5 py-3.5', (table.align?.[cellIndex] || (cellIndex === 0 ? 'left' : 'right')) === 'right' && 'mono text-right text-[13px]')}>{cell}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+          {table.totals && (
+            <tfoot className="border-t-2 bg-muted/30 font-semibold">
+              <tr>{table.totals.map((cell, cellIndex) => <td key={cellIndex} className={cx('px-5 py-3.5', (table.align?.[cellIndex] || (cellIndex === 0 ? 'left' : 'right')) === 'right' && 'mono text-right text-[13px]')}>{cell}</td>)}</tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function Reports() {
+  const { store } = useStore();
+  const [period, setPeriod] = useState<RevenuePeriod>('month');
+  const [tab, setTab] = useState<ReportTab>('sales');
+  const [printing, setPrinting] = useState(false);
+
+  const { orders, expenses, totals } = useMemo(() => periodScope(store, period), [store, period]);
+  const periodLabel = revenuePeriodLabel(period);
+  const products = useMemo(() => salesByProduct(orders, store.recipes), [orders, store.recipes]);
+  const categories = useMemo(() => salesByCategory(orders, store.recipes), [orders, store.recipes]);
+  const clients = useMemo(() => salesByClient(orders), [orders]);
+  const production = useMemo(() => productionByProduct(orders, store.recipes), [orders, store.recipes]);
+  const customers = useMemo(() => customerReport(store.orders, store.clients, period), [store.orders, store.clients, period]);
+  const stock = useMemo(() => stockReport(store.ingredients), [store.ingredients]);
+  const movement = useMemo(() => stockMovement(store.transactions, store.ingredients, period), [store.transactions, store.ingredients, period]);
+  const usage = useMemo(() => ingredientConsumption(orders, store.recipes, store.ingredients), [orders, store.recipes, store.ingredients]);
+  const expenseLines = useMemo(() => expenseBreakdown(expenses), [expenses]);
+  const trend = useMemo(() => trendForPeriod(store.orders, store.expenses, period), [store.orders, store.expenses, period]);
+  const profitability = useMemo(() => allRecipeProfitability(store.recipes, store.ingredients), [store.recipes, store.ingredients]);
+
+  const hasActivity = orders.length > 0 || expenses.length > 0;
+  const stockValue = stock.reduce((sum, line) => sum + line.value, 0);
+  const needsAttention = stock.filter(line => line.status === 'low' || line.status === 'out');
+  const usageCost = usage.reduce((sum, line) => sum + line.cost, 0);
+
+  const trendChart: ChartDatum[] = trend.map(point => ({ label: point.label, value: point.revenue, secondary: point.profit }));
+  const productChart: ChartDatum[] = products.slice(0, 8).map(line => ({ label: line.productName, value: line.revenue }));
+  const categoryChart: ChartDatum[] = categories.map(line => ({ label: line.category, value: line.revenue }));
+  const clientChart: ChartDatum[] = clients.slice(0, 8).map(line => ({ label: line.customerName, value: line.revenue }));
+  const productionChart: ChartDatum[] = production.slice(0, 10).map(line => ({ label: line.recipeName, value: line.units }));
+  const marginChart: ChartDatum[] = profitability
+    .filter(line => line.margin !== null)
+    .slice()
+    .sort((a, b) => (b.margin || 0) - (a.margin || 0))
+    .slice(0, 8)
+    .map(line => ({ label: line.recipe.name, value: Number((line.margin || 0).toFixed(1)) }));
+  const stockValueChart: ChartDatum[] = Object.entries(
+    stock.reduce<Record<string, number>>((acc, line) => { acc[line.category] = (acc[line.category] || 0) + line.value; return acc; }, {}),
+  ).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
+  const shortageChart: ChartDatum[] = Object.entries(
+    needsAttention.reduce<Record<string, number>>((acc, line) => { acc[line.category] = (acc[line.category] || 0) + 1; return acc; }, {}),
+  ).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
+  const expenseChart: ChartDatum[] = expenseLines.map(line => ({ label: line.category, value: line.amount }));
+
+  /* Rows are built once per view; the CSV and the PDF both read them. */
+  const salesTables: ReportTable[] = [
+    {
+      heading: 'Sales by product',
+      note: 'Revenue is net of discounts and excludes delivery and tax. Quantities are dozens, and the 12 individual items that make one.',
+      columns: ['Product', 'Category', 'Orders', 'Dozens', 'Units', 'Revenue', 'Cost', 'Profit', 'Margin'],
+      rows: products.map(line => [line.productName, line.category, line.orders, num(line.dozens), num(line.units), money(line.revenue), money(line.cost), money(line.profit), pct(line.margin)]),
+      totals: ['Total', '', totals.orders, num(totals.dozensSold), num(totals.unitsSold), money(totals.revenue), money(totals.costs), money(totals.grossProfit), pct(totals.grossMargin)],
+    },
+    {
+      heading: 'Orders in period',
+      note: 'Invoice total is what the customer owes: products plus delivery and tax, less discount.',
+      columns: ['Invoice', 'Date', 'Customer', 'Items', 'Net sales', 'Invoice total', 'Outstanding', 'Status'],
+      align: ['left', 'left', 'left', 'right', 'right', 'right', 'right', 'left'],
+      rows: orders.map(order => [
+        order.orderNumber,
+        shortDate(order.orderDate),
+        order.customerName,
+        num(order.items.reduce((sum, item) => sum + item.quantity, 0)),
+        money(orderRevenue(order)),
+        money(calculateOrderTotal(order.items, order.discount, order.deliveryFee, order.taxRate || 0)),
+        money(calculateOrderOutstanding(order.items, order.discount, order.deliveryFee, order.taxRate || 0, order.amountPaid || 0)),
+        order.paymentStatus,
+      ]),
+      totals: ['Total', '', '', '', money(totals.revenue), '', money(totals.outstanding), ''],
+    },
+  ];
+
+  const productionTables: ReportTable[] = [
+    {
+      heading: 'What to bake',
+      note: 'Every product demanded in the period, and the revenue that demand represents.',
+      columns: ['Product', 'Category', 'Orders', 'Dozens', 'Units', 'Batches', 'Revenue', 'Last due'],
+      align: ['left', 'left', 'right', 'right', 'right', 'right', 'right', 'right'],
+      rows: production.map(line => [line.recipeName, line.category, line.orders, num(line.dozens), num(line.units), num(line.batches), money(line.revenue), shortDate(line.lastDueDate)]),
+      totals: ['Total', '', '', num(totals.dozensSold), num(totals.unitsSold), '', money(totals.revenue), ''],
+    },
+    {
+      heading: 'Revenue by category',
+      columns: ['Category', 'Products', 'Dozens', 'Revenue', 'Share'],
+      rows: categories.map(line => [line.category, line.products, num(line.dozens), money(line.revenue), pct(shareOf(line.revenue, totals.revenue))]),
+      totals: ['Total', '', num(totals.dozensSold), money(totals.revenue), '100.0%'],
+    },
+  ];
+
+  const inventoryTables: ReportTable[] = [
+    {
+      heading: 'Stock needing attention',
+      note: 'At or below the minimum level set for the ingredient, or out of stock. Reorder from Purchase Orders.',
+      columns: ['Ingredient', 'Category', 'Supplier', 'On hand', 'Minimum', 'Value', 'Status'],
+      align: ['left', 'left', 'left', 'right', 'right', 'right', 'left'],
+      rows: needsAttention.map(line => [line.name, line.category, line.supplier || '—', `${num(line.currentStock)} ${line.unit}`, `${num(line.minimumStock)} ${line.unit}`, money(line.value), STOCK_STATUS_COPY[line.status]]),
+    },
+    {
+      heading: 'Full stock position',
+      note: 'Stock value uses each ingredient’s own unit cost. An ingredient with no recorded price contributes zero.',
+      columns: ['Ingredient', 'Category', 'On hand', 'Minimum', 'Of minimum', 'Value', 'Status'],
+      align: ['left', 'left', 'right', 'right', 'right', 'right', 'left'],
+      rows: stock.map(line => [
+        line.name, line.category,
+        `${num(line.currentStock)} ${line.unit}`,
+        `${num(line.minimumStock)} ${line.unit}`,
+        line.ratioToMinimum === null ? 'no minimum set' : pct(line.ratioToMinimum),
+        money(line.value),
+        STOCK_STATUS_COPY[line.status],
+      ]),
+      totals: ['Total', '', '', '', '', money(stockValue), ''],
+    },
+    {
+      heading: 'Ingredient consumption',
+      note: 'What the period’s orders will use, in each ingredient’s own unit.',
+      columns: ['Ingredient', 'Category', 'Quantity used', 'Cost of usage', 'Used by'],
+      align: ['left', 'left', 'right', 'right', 'left'],
+      rows: usage.map(line => [line.ingredientName, line.category, `${num(line.quantity)} ${line.unit}`, money(line.cost), line.recipes.join(', ') || '—']),
+      totals: ['Total', '', '', money(usageCost), ''],
+    },
+    {
+      heading: 'Stock movements',
+      note: 'Every recorded purchase, issue or adjustment in the period.',
+      columns: ['Date', 'Ingredient', 'Type', 'Quantity', 'Note'],
+      align: ['left', 'left', 'left', 'right', 'left'],
+      rows: movement.map(line => [shortDate(line.date), line.ingredientName, line.type, `${num(line.quantity)} ${line.unit}`, line.note || '—']),
+    },
+  ];
+
+  const customerTables: ReportTable[] = [
+    {
+      heading: 'Customer activity',
+      note: 'Lifetime order counts cover every order on record, so a buyer new in this period still shows their history.',
+      columns: ['Customer', 'Orders in period', 'Revenue', 'Average order', 'Lifetime orders', 'First order', 'Last order'],
+      align: ['left', 'right', 'right', 'right', 'right', 'right', 'right'],
+      rows: customers.clients.map(line => [line.customerName, line.orders, money(line.revenue), money(line.averageOrderValue), line.lifetimeOrders, shortDate(line.firstOrderDate), shortDate(line.lastOrderDate)]),
+      totals: ['Total', totals.orders, money(totals.revenue), money(totals.averageOrderValue), '', '', ''],
+    },
+    {
+      heading: 'Client file status',
+      note: 'The client list, which may hold buyers who have not ordered yet.',
+      columns: ['Status', 'Clients'],
+      align: ['left', 'right'],
+      rows: [
+        ['Active', store.clients.filter(client => (client.status || 'active') === 'active').length],
+        ['Pending', store.clients.filter(client => client.status === 'pending').length],
+      ],
+      totals: ['On file', store.clients.length],
+    },
+  ];
+
+  const financialTables: ReportTable[] = [
+    {
+      heading: 'Profit and loss',
+      note: 'Net sales less ingredient cost is gross profit; recorded expenses then take it to net profit.',
+      columns: ['Line', 'Amount', 'Share of net sales'],
+      rows: [
+        ['Net sales', money(totals.revenue), '100.0%'],
+        ['Ingredient cost of goods sold', `-${money(totals.costs)}`, pct(totals.revenue > 0 ? shareOf(totals.costs, totals.revenue) : null)],
+        ['Gross profit', money(totals.grossProfit), pct(totals.grossMargin)],
+        ['Operating expenses', `-${money(totals.expenses)}`, pct(totals.revenue > 0 ? shareOf(totals.expenses, totals.revenue) : null)],
+        ['Net profit', money(totals.profit), pct(totals.profitMargin)],
+      ],
+      totals: ['Net profit', money(totals.profit), pct(totals.profitMargin)],
+    },
+    {
+      heading: 'Expenses by category',
+      columns: ['Category', 'Entries', 'Amount', 'Share'],
+      rows: expenseLines.map(line => [line.category, line.count, money(line.amount), pct(line.share)]),
+      totals: ['Total', expenses.length, money(totals.expenses), expenses.length ? '100.0%' : '—'],
+    },
+    {
+      heading: 'Expense detail',
+      columns: ['Date', 'Category', 'Description', 'Supplier', 'Amount'],
+      align: ['left', 'left', 'left', 'left', 'right'],
+      rows: [...expenses]
+        .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+        .map(expense => [shortDate(expense.date), expense.category, expense.description || '—', expense.supplier || '—', money(expense.amount)]),
+      totals: ['Total', '', '', '', money(totals.expenses)],
+    },
+  ];
+
+  const profitabilityTables: ReportTable[] = [
+    {
+      heading: 'Estimated margin per product',
+      note: 'Margin is estimated from each recipe’s ingredient cost and its selling price per dozen.',
+      columns: ['Product', 'Selling price', 'Cost per dozen', 'Profit per dozen', 'Margin'],
+      rows: profitability.map(line => [line.recipe.name, money(line.revenue), money(line.costPerDozen), money(line.profit), pct(line.margin)]),
+    },
+  ];
+
+  const views: Record<ReportTab, { kpis: ReportKpi[]; tables: ReportTable[]; notes: string[]; charts: { title: string; subtitle: string; chart: ReactNode }[] }> = {
+    sales: {
+      kpis: [
+        { label: 'Net sales', value: money(totals.revenue), note: 'after discounts' },
+        { label: 'Orders', value: totals.orders.toLocaleString('en-SZ'), note: periodLabel },
+        { label: 'Average order', value: money(totals.averageOrderValue), note: 'per invoice' },
+        { label: 'Gross profit', value: money(totals.grossProfit), note: `${pct(totals.grossMargin)} margin` },
+      ],
+      tables: salesTables,
+      notes: [
+        'Net sales are product lines less any discount. Delivery and tax are passed on to the customer and are excluded.',
+        'Product cost uses each order line’s recorded unit cost, so it reflects the stock priced when the order was taken.',
+      ],
+      charts: [
+        { title: 'Net sales and profit over time', subtitle: periodLabel, chart: <TrendReportChart data={trendChart} format={money} secondaryLabel="Profit" label={`Net sales and profit, ${periodLabel}`} /> },
+        { title: 'Net sales by product', subtitle: periodLabel, chart: <BarReportChart data={productChart} horizontal format={money} label={`Net sales by product, ${periodLabel}`} /> },
+        { title: 'Net sales by category', subtitle: periodLabel, chart: <DonutReportChart data={categoryChart} format={money} label={`Net sales by category, ${periodLabel}`} /> },
+        { title: 'Net sales by customer', subtitle: periodLabel, chart: <BarReportChart data={clientChart} horizontal format={money} label={`Net sales by customer, ${periodLabel}`} /> },
+      ],
+    },
+    production: {
+      kpis: [
+        { label: 'Products demanded', value: production.length.toLocaleString('en-SZ'), note: periodLabel },
+        { label: 'Dozens to bake', value: num(totals.dozensSold), note: 'ordered' },
+        { label: 'Individual items', value: num(totals.unitsSold), note: `${DOZEN} per dozen` },
+        { label: 'Order value committed', value: money(totals.revenue), note: `${totals.orders} orders` },
+      ],
+      tables: productionTables,
+      notes: [
+        'Production is read straight from the orders in the period — nothing is scheduled or reserved by this report.',
+        `Batches divide the ordered dozens by each recipe's batch yield, to two decimals. A dozen is ${DOZEN} individual items.`,
+      ],
+      charts: [
+        { title: 'Items to produce by product', subtitle: periodLabel, chart: <BarReportChart data={productionChart} horizontal format={(value: number) => `${num(value)} units`} label={`Items to produce by product, ${periodLabel}`} /> },
+        { title: 'Orders and ingredient cost over time', subtitle: periodLabel, chart: <TrendReportChart data={trend.map(point => ({ label: point.label, value: point.orders, secondary: point.costs }))} secondaryLabel="Ingredient cost" label={`Orders and ingredient cost, ${periodLabel}`} /> },
+      ],
+    },
+    inventory: {
+      kpis: [
+        { label: 'Stock value', value: money(stockValue), note: 'at unit cost' },
+        { label: 'Needs attention', value: needsAttention.length.toLocaleString('en-SZ'), note: 'low or out' },
+        { label: 'Ingredients tracked', value: stock.length.toLocaleString('en-SZ'), note: 'on file' },
+        { label: 'Stock movements', value: movement.length.toLocaleString('en-SZ'), note: periodLabel },
+      ],
+      tables: inventoryTables,
+      notes: [
+        'This report is read-only. It changes no stock and creates no orders — reorder from Purchase Orders.',
+        'Stock value is only as good as the unit costs on file. An ingredient with no recorded price contributes zero.',
+      ],
+      charts: [
+        { title: 'Stock value by category', subtitle: 'at recorded unit cost', chart: <DonutReportChart data={stockValueChart} format={money} label="Stock value by category" /> },
+        { title: 'At or below minimum, by category', subtitle: `${needsAttention.length} ingredients`, chart: <BarReportChart data={shortageChart} format={(value: number) => `${value.toLocaleString('en-SZ')} ingredients`} label="Ingredients at or below minimum, by category" /> },
+      ],
+    },
+    customers: {
+      kpis: [
+        { label: 'Clients on file', value: customers.clientsOnFile.toLocaleString('en-SZ'), note: 'in the client list' },
+        { label: 'Active in period', value: customers.activeInPeriod.toLocaleString('en-SZ'), note: 'placed orders' },
+        { label: 'Revenue in period', value: money(totals.revenue), note: 'from those orders' },
+        { label: 'Repeat rate', value: pct(customers.repeatRate), note: `${customers.oneTimeInPeriod} first-time only` },
+      ],
+      tables: customerTables,
+      notes: [
+        'Customers are matched on the name written on the order, not on the client file, so an order from someone never added still counts.',
+        'Lifetime figures cover every order on record; in-period figures follow the period selector above.',
+      ],
+      charts: [
+        { title: 'Net sales by customer', subtitle: periodLabel, chart: <BarReportChart data={clientChart} horizontal format={money} label={`Net sales by customer, ${periodLabel}`} /> },
+        { title: 'Repeat against one-time buyers', subtitle: periodLabel, chart: <DonutReportChart data={[{ label: 'Repeat buyers', value: customers.repeatInPeriod }, { label: 'One-time buyers', value: customers.oneTimeInPeriod }]} format={(value: number) => `${value.toLocaleString('en-SZ')} customers`} label="Repeat versus one-time buyers in period" /> },
+      ],
+    },
+    financial: {
+      kpis: [
+        { label: 'Net sales', value: money(totals.revenue), note: periodLabel },
+        { label: 'Gross profit', value: money(totals.grossProfit), note: `${pct(totals.grossMargin)} margin` },
+        { label: 'Expenses', value: money(totals.expenses), note: `${expenses.length} entries` },
+        { label: 'Net profit', value: money(totals.profit), note: `${pct(totals.profitMargin)} margin` },
+      ],
+      tables: [...financialTables, ...profitabilityTables],
+      notes: [
+        'Net sales are product lines less discounts; delivery and tax are excluded because the customer pays them on.',
+        'Ingredient cost is the cost recorded on the order lines. Labor, energy and packaging are not tracked in this app, so they are not costed here.',
+        'Margin per product below is an estimate from recipe costs and the selling price per dozen.',
+      ],
+      charts: [
+        { title: 'Net sales against expenses', subtitle: periodLabel, chart: <GroupedBarReportChart data={trend.map(point => ({ label: point.label, value: point.revenue, secondary: point.expenses }))} format={money} secondaryLabel="Expenses" label={`Net sales against expenses, ${periodLabel}`} /> },
+        { title: 'Expenses by category', subtitle: periodLabel, chart: <DonutReportChart data={expenseChart} format={money} label="Expenses by category" /> },
+        { title: 'Margin by product', subtitle: 'estimated from recipe costs', chart: <BarReportChart data={marginChart} horizontal format={(value: number) => `${value.toFixed(1)}%`} label="Margin by product" /> },
+      ],
+    },
+  };
+
+  const activeTab = REPORT_TABS.find(item => item.id === tab)!;
+  const view = views[tab];
+  const hasContent = view.tables.some(table => table.rows.length > 0) || view.charts.some(entry => entry.chart);
+
+  /* The printed document carries the same rows, plus one chart per table and the
+     notes that keep the numbers honest. */
+  const printSections: ReportSection[] = view.tables.map((table, index) => ({
+    heading: table.heading,
+    note: table.note,
+    chart: index < view.charts.length ? view.charts[index].chart : undefined,
+    columns: table.columns,
+    rows: table.rows,
+    totals: table.totals,
+    align: table.align,
+  }));
+
+  const ordersCsv = useMemo(
+    () => `order,customer,total,status\n${store.orders.filter(o => !o.excludeFromRevenue).map(o => `${o.orderNumber},${o.customerName},${calculateOrderTotal(o.items, o.discount, o.deliveryFee, o.taxRate || 0)},${o.paymentStatus}`).join('\n')}`,
+    [store.orders],
+  );
+
+  const exportCsv = () => {
+    const blocks = view.tables.map(table =>
+      `${csvCell(table.heading)}\n${toCsv(table.columns, table.rows)}${table.totals ? `\n${toCsv(table.columns, [table.totals])}` : ''}`,
+    );
+    downloadCsv(`little-bliss-${tab}-report.csv`, `Little Bliss Bakery - ${activeTab.label} report\n${periodLabel}\n\n${blocks.join('\n\n')}`);
+  };
+
+  return (
+    <div className="stagger">
+      <PageHeader
+        eyebrow="Numbers with context"
+        title="Reports"
+        description="Sales, production, inventory, customers and money — from the orders you have already recorded."
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Button variant="soft" onClick={() => downloadCsv('little-bliss-orders.csv', ordersCsv)}><Download size={16} /> Orders CSV</Button>
+            <Button variant="soft" onClick={exportCsv}><Download size={16} /> {activeTab.label} CSV</Button>
+            <Button onClick={() => setPrinting(true)}><FileText size={16} /> Print report</Button>
+          </div>
+        }
+      />
+
+      <div className="mb-4 flex flex-wrap items-center gap-1 rounded-lg border bg-card p-1 w-fit">
+        {REVENUE_PERIODS.map(p => (
+          <button key={p.value} data-testid={`button-period-${p.value}`} onClick={() => setPeriod(p.value)} className={cx('rounded-md px-3 py-1.5 text-xs font-semibold', period === p.value ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')}>
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="mb-5 flex gap-2 overflow-x-auto pb-1">
+        {REPORT_TABS.map(item => (
+          <button key={item.id} data-testid={`button-report-${item.id}`} onClick={() => setTab(item.id)} className={cx('flex-shrink-0 rounded-lg border px-4 py-2 text-left transition-colors', tab === item.id ? 'border-primary bg-primary/5' : 'hover:bg-muted')}>
+            <p className={cx('text-sm font-semibold', tab === item.id && 'text-primary')}>{item.label}</p>
+            <p className="text-[11px] text-muted-foreground">{item.description}</p>
+          </button>
+        ))}
+      </div>
+
+      <ReportKpiGrid kpis={view.kpis} />
+
+      <div className="mt-5 grid gap-5 xl:grid-cols-2">
+        {view.charts.map(entry => (
+          <ChartCard key={entry.title} title={entry.title} subtitle={entry.subtitle} empty={!hasActivity}>
+            {entry.chart}
+          </ChartCard>
+        ))}
+      </div>
+
+      <div className="mt-5 space-y-5">
+        {view.tables.map(table => <ReportTablePanel key={table.heading} table={table} />)}
+      </div>
+
+      <div className="mt-5 rounded-xl border bg-card p-5 text-xs leading-relaxed text-muted-foreground shadow-sm">
+        <p className="mb-2 text-sm font-semibold text-foreground">How to read this report</p>
+        <ul className="space-y-1.5">
+          {view.notes.map(note => <li key={note} className="flex gap-2"><span className="text-primary">•</span>{note}</li>)}
+        </ul>
+      </div>
+
+      {printing && (
+        <ReportPrintPortal title={`${activeTab.label} report`} onClose={() => setPrinting(false)}>
+          <ReportDocument
+            settings={store.settings}
+            title={`${activeTab.label} report`}
+            subtitle={activeTab.description}
+            period={periodLabel}
+            kpis={view.kpis}
+            sections={printSections}
+            notes={view.notes}
+          />
+        </ReportPrintPortal>
+      )}
+    </div>
+  );
+}
 function Budget() {
   const { store, update } = useStore(); const isMobile = useIsMobile(); const [edit, setEdit] = useState<BudgetAllocation | null>(null); const [deletingAlloc, setDeletingAlloc] = useState<BudgetAllocation | null>(null); const [deleteStep, setDeleteStep] = useState(0);
   const now = new Date(); const cm = now.getMonth(); const cy = now.getFullYear();
@@ -1557,21 +2379,32 @@ function Budget() {
 }
 function BudgetModal({ value, onClose, onSave }: { value: BudgetAllocation; onClose: () => void; onSave: (v: BudgetAllocation) => void }) { const [a, setA] = useState(value); return <Modal title={value.name ? 'Edit allocation' : 'New allocation'} onClose={onClose}><form onSubmit={e => { e.preventDefault(); onSave(a); }} className="space-y-4"><Field label="Name"><Input required value={a.name} onChange={e => setA({ ...a, name: e.target.value })} placeholder="e.g. Ingredients" /></Field><Field label="Mode"><Select value={a.mode} onChange={e => setA({ ...a, mode: e.target.value })}><option value="percent">Percent of available</option><option value="fixed">Fixed amount</option></Select></Field><Field label={a.mode === 'percent' ? 'Percentage' : 'Amount'}><Input type="number" min="0" step=".01" value={a.value} onChange={e => setA({ ...a, value: Number(e.target.value) })} /></Field><div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={onClose}>Cancel</Button><Button type="submit">Save allocation</Button></div></form></Modal>; }
 
+
 function Clients() {
   const { store, update } = useStore();
   const isMobile = useIsMobile();
   const [edit, setEdit] = useState<Client | null>(null);
   const [search, setSearch] = useState('');
-  const [filterLetter, setFilterLetter] = useState('');
+  const [filterLetters, setFilterLetters] = useState<string[]>([]);
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'pending'>('all');
+  const [filterCategory, setFilterCategory] = useState('');
+  const [filterCity, setFilterCity] = useState('');
   const rows = store.clients.filter(c => {
     const matchesSearch = c.name.toLowerCase().includes(search.toLowerCase()) || c.phone.includes(search) || c.city.toLowerCase().includes(search.toLowerCase());
-    const matchesLetter = !filterLetter || c.name.toUpperCase().startsWith(filterLetter);
+    const matchesLetter = !filterLetters.length || filterLetters.some(l => c.name.toUpperCase().startsWith(l));
     const matchesStatus = filterStatus === 'all' || (c.status || 'active') === filterStatus;
-    return matchesSearch && matchesLetter && matchesStatus;
+    const matchesCategory = !filterCategory || (c.category || '') === filterCategory;
+    const matchesCity = !filterCity || c.city === filterCity;
+    return matchesSearch && matchesLetter && matchesStatus && matchesCategory && matchesCity;
   });
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
   const usedLetters = [...new Set(store.clients.map(c => c.name[0]?.toUpperCase()))].sort();
+  const categories = [...new Set(store.clients.map(c => c.category).filter((v): v is string => !!v))].sort();
+  const cities = [...new Set(store.clients.map(c => c.city).filter((v): v is string => !!v))].sort();
+  const hasFilters = !!search || filterLetters.length > 0 || filterStatus !== 'all' || !!filterCategory || !!filterCity;
+  const toggleLetter = (l: string) => setFilterLetters(prev => prev.includes(l) ? prev.filter(x => x !== l) : [...prev, l]);
+  const clearFilters = () => { setSearch(''); setFilterLetters([]); setFilterStatus('all'); setFilterCategory(''); setFilterCity(''); };
+  const newClient = (): Client => ({ id: id('cli'), name: '', address: '', city: '', phone: '', email: '', notes: '', createdAt: new Date().toISOString(), status: 'active' });
   const saveClient = (c: Client) => {
     const exists = store.clients.some(x => x.id === c.id);
     update({ clients: exists ? store.clients.map(x => x.id === c.id ? c : x) : [c, ...store.clients] });
@@ -1580,26 +2413,113 @@ function Clients() {
   const removeClient = (c: Client) => {
     if (window.confirm(`Delete ${c.name}?`)) update({ clients: store.clients.filter(x => x.id !== c.id) });
   };
-  if (isMobile) { return <div><div className="mb-4 flex items-center justify-between"><h1 className="display text-xl font-semibold">Clients</h1><Button onClick={() => setEdit({ id: id('cli'), name: '', address: '', city: '', phone: '', email: '', notes: '', createdAt: new Date().toISOString(), status: 'active' })}><Plus size={16} /> Add</Button></div><div className="relative mb-4"><Search className="absolute left-3 top-2.5 text-muted-foreground" size={16} /><Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search clients..." className="pl-9" /></div><div className="mb-3 flex gap-1.5 overflow-x-auto pb-1">{([['all', 'All'], ['active', 'Active'], ['pending', 'Pending']] as const).map(([key, label]) => <button key={key} onClick={() => setFilterStatus(key)} className={cx('shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors', filterStatus === key ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80')}>{label}</button>)}</div><div className="mb-3 flex flex-wrap gap-1">{alphabet.map(l => <button key={l} onClick={() => setFilterLetter(filterLetter === l ? '' : l)} className={cx('h-7 w-7 rounded text-xs font-semibold transition-colors', filterLetter === l ? 'bg-primary text-primary-foreground' : usedLetters.includes(l) ? 'bg-muted text-foreground' : 'text-muted-foreground/40')}>{l}</button>)}</div><div className="mb-3 flex items-center justify-center gap-4 text-[10px] text-muted-foreground"><span className="flex items-center gap-1"><ArrowUpRight size={10} /> Swipe right to edit</span><span className="flex items-center gap-1">Swipe left to delete <ArrowDownRight size={10} /></span></div><div className="space-y-2">{rows.map(c => <SwipeableRow key={c.id} onEdit={() => setEdit(c)} onDelete={() => removeClient(c)}><Card className="p-4"><div className="flex items-center gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-secondary text-sm font-bold text-secondary-foreground">{c.name.split(' ').map(x => x[0]).join('').slice(0, 2)}</span><div className="min-w-0 flex-1"><p className="font-semibold text-sm">{c.name}</p><p className="text-[10px] text-muted-foreground">{[c.address, c.city].filter(Boolean).join(', ') || 'No address'}{c.phone ? ` · ${c.phone}` : ''}</p></div>{(c.status || 'active') === 'pending' && <span className="rounded-full bg-accent/20 px-2 py-0.5 text-[10px] font-semibold text-accent-foreground">Pending</span>}</div></Card></SwipeableRow>)}{!rows.length && <Empty icon={Users} title="No clients yet" detail="Clients are saved automatically when you create orders." />}</div>{edit && <ClientModal value={edit} onClose={() => setEdit(null)} onSave={saveClient} />}</div>; }
-  return <div>
-    <PageHeader eyebrow="Contacts" title="Clients" description="Saved customer details for quick invoice filling." action={<Button onClick={() => setEdit({ id: id('cli'), name: '', address: '', city: '', phone: '', email: '', notes: '', createdAt: new Date().toISOString(), status: 'active' })}><Plus size={17} /> Add client</Button>} />
-    <div className="mb-4 flex items-center gap-3">
-      <div className="relative max-w-sm flex-1"><Search className="absolute left-3 top-3 text-muted-foreground" size={16} /><Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search clients..." className="pl-9" /></div>
+  const statusChips = (compact: boolean) => (
+    <div className={cx('flex gap-1.5 overflow-x-auto pb-1', compact ? 'mb-3' : 'mb-4')}>
+      {([['all', 'All'], ['active', 'Active'], ['pending', 'Pending']] as const).map(([key, label]) => (
+        <button key={key} onClick={() => setFilterStatus(key)} className={cx('shrink-0 rounded-lg font-semibold transition-colors', compact ? 'px-3 py-1.5 text-xs' : 'px-4 py-2 text-xs', filterStatus === key ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80')}>{label}</button>
+      ))}
     </div>
-    <div className="mb-4 flex gap-1.5 overflow-x-auto pb-1">{([['all', 'All'], ['active', 'Active'], ['pending', 'Pending']] as const).map(([key, label]) => <button key={key} onClick={() => setFilterStatus(key)} className={cx('shrink-0 rounded-lg px-4 py-2 text-xs font-semibold transition-colors', filterStatus === key ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80')}>{label}</button>)}</div>
-    <div className="mb-4 flex flex-wrap gap-1">
-      {alphabet.map(l => <button key={l} onClick={() => setFilterLetter(filterLetter === l ? '' : l)} className={cx('h-7 w-7 rounded text-xs font-semibold transition-colors', filterLetter === l ? 'bg-primary text-primary-foreground' : usedLetters.includes(l) ? 'bg-muted text-foreground hover:bg-muted/80' : 'text-muted-foreground/40 cursor-default')}>{l}</button>)}
+  );
+  const letterBar = (
+    <div className="mb-3 flex flex-wrap gap-1">
+      {alphabet.map(l => {
+        const used = usedLetters.includes(l);
+        const on = filterLetters.includes(l);
+        return <button key={l} disabled={!used} onClick={() => toggleLetter(l)} className={cx('h-7 w-7 rounded text-xs font-semibold transition-colors', on ? 'bg-primary text-primary-foreground' : used ? 'bg-muted text-foreground hover:bg-muted/80' : 'cursor-default text-muted-foreground/40')}>{l}</button>;
+      })}
+      {filterLetters.length > 0 && <button onClick={() => setFilterLetters([])} className="h-7 rounded px-2 text-xs font-semibold text-primary hover:underline">Clear</button>}
     </div>
-    <Card className="overflow-hidden">{rows.length ? <div className="divide-y">{rows.map(c => <div key={c.id} className="flex items-center gap-4 px-5 py-4">
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-secondary text-sm font-bold text-secondary-foreground">{c.name.split(' ').map(x => x[0]).join('').slice(0, 2)}</span>
-      <div className="min-w-0 flex-1"><p className="font-semibold">{c.name}</p><p className="text-xs text-muted-foreground">{[c.address, c.city].filter(Boolean).join(', ') || 'No address'}{c.phone ? ` · ${c.phone}` : ''}</p></div>
-      {(c.status || 'active') === 'pending' && <span className="rounded-full bg-accent/20 px-2.5 py-1 text-xs font-semibold text-accent-foreground">Pending</span>}
-      <div className="flex gap-1.5"><IconButton label={`Edit ${c.name}`} onClick={() => setEdit(c)}><Pencil size={16} /></IconButton><IconButton label={`Delete ${c.name}`} onClick={() => removeClient(c)}><Trash2 size={16} /></IconButton></div>
-    </div>)}</div> : <Empty icon={Users} title="No clients yet" detail="Clients are saved automatically when you create orders." />}
-    </Card>
-    {edit && <ClientModal value={edit} onClose={() => setEdit(null)} onSave={saveClient} />}
-  </div>;
+  );
+  const selectFilters = (compact: boolean) => (
+    <div className={cx('flex gap-2', compact && 'mb-3')}>
+      <div className="w-40"><Select aria-label="Filter by category" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}><option value="">All categories</option>{categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}</Select></div>
+      <div className="w-40"><Select aria-label="Filter by location" value={filterCity} onChange={e => setFilterCity(e.target.value)}><option value="">All locations</option>{cities.map(city => <option key={city} value={city}>{city}</option>)}</Select></div>
+      {hasFilters && <Button variant="ghost" onClick={clearFilters}>Clear</Button>}
+    </div>
+  );
+  const emptyState = store.clients.length
+    ? <Empty icon={Search} title="No clients match" detail="Try a different search, or clear the filters you have applied." action={hasFilters ? <Button variant="soft" onClick={clearFilters}>Clear filters</Button> : undefined} />
+    : <Empty icon={Users} title="No clients yet" detail="Clients are saved automatically when you create orders." />;
+  const categoryBadge = (c: Client, compact: boolean) => c.category ? <span className={cx('rounded-full bg-muted px-2 font-semibold text-muted-foreground', compact ? 'py-0.5 text-[10px]' : 'py-1 text-xs')}>{c.category}</span> : null;
+
+  if (isMobile) {
+    return (
+      <div>
+        <div className="mb-4 flex items-center justify-between">
+          <h1 className="display text-xl font-semibold">Clients</h1>
+          <Button onClick={() => setEdit(newClient())}><Plus size={16} /> Add</Button>
+        </div>
+        <div className="relative mb-4">
+          <Search className="absolute left-3 top-2.5 text-muted-foreground" size={16} />
+          <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search clients..." className="pl-9" />
+        </div>
+        {statusChips(true)}
+        {letterBar}
+        {selectFilters(true)}
+        <div className="mb-3 flex items-center justify-center gap-4 text-[10px] text-muted-foreground">
+          <span className="flex items-center gap-1"><ArrowUpRight size={10} /> Swipe right to edit</span>
+          <span className="flex items-center gap-1">Swipe left to delete <ArrowDownRight size={10} /></span>
+        </div>
+        <div className="space-y-2">
+          {rows.map(c => (
+            <SwipeableRow key={c.id} onEdit={() => setEdit(c)} onDelete={() => removeClient(c)}>
+              <Card className="p-4">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-secondary text-sm font-bold text-secondary-foreground">{c.name.split(' ').map(x => x[0]).join('').slice(0, 2)}</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-sm">{c.name}</p>
+                    <p className="text-[10px] text-muted-foreground">{[c.address, c.city].filter(Boolean).join(', ') || 'No address'}{c.phone ? ` · ${c.phone}` : ''}</p>
+                  </div>
+                  {(c.status || 'active') === 'pending' && <span className="rounded-full bg-accent/20 px-2 py-0.5 text-[10px] font-semibold text-accent-foreground">Pending</span>}
+                  {categoryBadge(c, true)}
+                </div>
+              </Card>
+            </SwipeableRow>
+          ))}
+          {!rows.length && emptyState}
+        </div>
+        {edit && <ClientModal value={edit} onClose={() => setEdit(null)} onSave={saveClient} />}
+      </div>
+    );
+  }
+  return (
+    <div>
+      <PageHeader eyebrow="Contacts" title="Clients" description="Saved customer details for quick invoice filling." action={<Button onClick={() => setEdit(newClient())}><Plus size={17} /> Add client</Button>} />
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div className="relative min-w-64 max-w-sm flex-1">
+          <Search className="absolute left-3 top-3 text-muted-foreground" size={16} />
+          <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search clients..." className="pl-9" />
+        </div>
+        {selectFilters(false)}
+      </div>
+      {statusChips(false)}
+      {letterBar}
+      <Card className="overflow-hidden">
+        {rows.length ? (
+          <div className="divide-y">
+            {rows.map(c => (
+              <div key={c.id} className="flex items-center gap-4 px-5 py-4">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-secondary text-sm font-bold text-secondary-foreground">{c.name.split(' ').map(x => x[0]).join('').slice(0, 2)}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold">{c.name}</p>
+                  <p className="text-xs text-muted-foreground">{[c.address, c.city].filter(Boolean).join(', ') || 'No address'}{c.phone ? ` · ${c.phone}` : ''}</p>
+                </div>
+                {categoryBadge(c, false)}
+                {(c.status || 'active') === 'pending' && <span className="rounded-full bg-accent/20 px-2.5 py-1 text-xs font-semibold text-accent-foreground">Pending</span>}
+                <div className="flex gap-1.5">
+                  <IconButton label={`Edit ${c.name}`} onClick={() => setEdit(c)}><Pencil size={16} /></IconButton>
+                  <IconButton label={`Delete ${c.name}`} onClick={() => removeClient(c)}><Trash2 size={16} /></IconButton>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : emptyState}
+      </Card>
+      {edit && <ClientModal value={edit} onClose={() => setEdit(null)} onSave={saveClient} />}
+    </div>
+  );
 }
+
 
 function CustomerAnalytics() {
   const { store } = useStore();
@@ -1733,6 +2653,7 @@ function ClientModal({ value, onClose, onSave }: { value: Client; onClose: () =>
         <Field label="Address"><Input value={c.address} onChange={e => set('address', e.target.value)} /></Field>
         <Field label="City"><Input value={c.city} onChange={e => set('city', e.target.value)} /></Field>
         <Field label="Email"><Input type="email" value={c.email} onChange={e => set('email', e.target.value)} /></Field>
+        <Field label="Category"><Select value={c.category || ''} onChange={e => set('category', e.target.value)}><option value="">No category</option>{CLIENT_CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}</Select></Field>
         <Field label="Status"><Select value={c.status || 'active'} onChange={e => set('status', e.target.value)}><option value="active">Active</option><option value="pending">Pending</option></Select></Field>
       </div>
       <Field label="Notes"><textarea className="min-h-16 w-full rounded-lg border bg-background p-3 text-sm outline-none" value={c.notes} onChange={e => set('notes', e.target.value)} /></Field>
@@ -1756,162 +2677,254 @@ function NotFound() { return <div className="flex min-h-[60vh] flex-col items-ce
 function SalesAnalytics() {
   const { store } = useStore();
   const [period, setPeriod] = useState<RevenuePeriod>('month');
+  const [printing, setPrinting] = useState(false);
   const analytics = useMemo(() => calculateSalesAnalytics(store.orders, store.recipes, period), [store.orders, store.recipes, period]);
-  const isMobile = useIsMobile();
+  const periodLabel = revenuePeriodLabel(period);
+  const { orders, expenses, totals } = useMemo(() => periodScope(store, period), [store, period]);
+  const products = useMemo(() => salesByProduct(orders, store.recipes), [orders, store.recipes]);
+  const categories = useMemo(() => salesByCategory(orders, store.recipes), [orders, store.recipes]);
+  const clients = useMemo(() => salesByClient(orders), [orders]);
+  const trend = useMemo(() => trendForPeriod(store.orders, store.expenses, period), [store.orders, store.expenses, period]);
 
-  return <div className="stagger">
-    <PageHeader eyebrow="Analytics" title="Sales Dashboard" description="Track your sales trends, top products, and revenue growth." />
-    <div className="mb-5 flex flex-wrap items-center gap-1 rounded-lg border bg-card p-1 w-fit">
-      {REVENUE_PERIODS.map(p => (
-        <button key={p.value} onClick={() => setPeriod(p.value)} className={cx('rounded-md px-3 py-1.5 text-xs font-semibold', period === p.value ? 'border-primary bg-primary/5 text-primary' : 'text-muted-foreground hover:bg-muted')}>
-          {p.label}
-        </button>
-      ))}
-    </div>
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <Metric label="Total Revenue" value={money(analytics.totalRevenue)} trend={`${analytics.totalOrders} orders`} icon={TrendingUp} tone="primary" note={revenuePeriodLabel(period)} />
-      <Metric label="Average Order" value={money(analytics.averageOrderValue)} trend="per order" icon={Banknote} tone="lime" note="average value" />
-      <Metric label="Total Orders" value={analytics.totalOrders.toString()} trend="processed" icon={Receipt} tone="peach" note="in this period" />
-      <Metric label="Top Product" value={analytics.topProducts[0]?.productName || '—'} trend={analytics.topProducts[0] ? money(analytics.topProducts[0].revenue) : 'No data'} icon={Sparkles} tone="dark" note="best seller" />
-    </div>
-    <div className="mt-5 grid gap-5 xl:grid-cols-2">
-      <Card className="overflow-hidden">
-        <div className="flex items-center justify-between border-b px-5 py-4">
-          <div>
-            <h2 className="font-semibold">Monthly Trend</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">Revenue over the last 12 months</p>
+  const salesTrend: ChartDatum[] = trend.map(point => ({ label: point.label, value: point.revenue, secondary: point.profit }));
+  const productChart: ChartDatum[] = products.slice(0, 8).map(line => ({ label: line.productName, value: line.revenue }));
+  const categoryChart: ChartDatum[] = categories.map(line => ({ label: line.category, value: line.revenue }));
+  const clientChart: ChartDatum[] = clients.slice(0, 8).map(line => ({ label: line.customerName, value: line.revenue }));
+  const topProduct = products[0];
+
+  const kpis: ReportKpi[] = [
+    { label: 'Total revenue', value: money(analytics.totalRevenue), note: periodLabel },
+    { label: 'Average order', value: money(analytics.averageOrderValue), note: `${analytics.totalOrders} orders` },
+    { label: 'Gross profit', value: money(totals.grossProfit), note: `${pct(totals.grossMargin)} margin` },
+    { label: 'Top product', value: topProduct?.productName || '—', note: topProduct ? money(topProduct.revenue) : 'nothing sold yet' },
+  ];
+
+  const tables: ReportTable[] = [
+    {
+      heading: 'Product performance',
+      note: 'Revenue is net of discounts; cost is the ingredient cost recorded on the order lines. Quantities are dozens and the 12 items in one.',
+      columns: ['Product', 'Category', 'Orders', 'Dozens', 'Units', 'Revenue', 'Cost', 'Profit', 'Margin'],
+      rows: products.map(line => [line.productName, line.category, line.orders, num(line.dozens), num(line.units), money(line.revenue), money(line.cost), money(line.profit), pct(line.margin)]),
+      totals: ['Total', '', totals.orders, num(totals.dozensSold), num(totals.unitsSold), money(totals.revenue), money(totals.costs), money(totals.grossProfit), pct(totals.grossMargin)],
+    },
+    {
+      heading: 'Sales by category',
+      columns: ['Category', 'Products', 'Dozens', 'Revenue', 'Share'],
+      rows: categories.map(line => [line.category, line.products, num(line.dozens), money(line.revenue), pct(shareOf(line.revenue, totals.revenue))]),
+      totals: ['Total', '', num(totals.dozensSold), money(totals.revenue), '100.0%'],
+    },
+    {
+      heading: 'Top customers',
+      columns: ['Customer', 'Orders', 'Revenue', 'Average order', 'Last order'],
+      align: ['left', 'right', 'right', 'right', 'right'],
+      rows: clients.slice(0, 10).map(line => [line.customerName, line.orders, money(line.revenue), money(line.averageOrderValue), shortDate(line.lastOrderDate)]),
+      totals: ['Total', totals.orders, money(totals.revenue), money(totals.averageOrderValue), ''],
+    },
+    {
+      heading: 'Month by month',
+      note: 'The last twelve calendar months, whatever the period selector says — for the long view.',
+      columns: ['Month', 'Orders', 'Net sales', 'Ingredient cost', 'Expenses', 'Profit'],
+      rows: trend.map(point => [point.label, point.orders, money(point.revenue), money(point.costs), money(point.expenses), money(point.profit)]),
+      totals: ['Total', '', money(totals.revenue), money(totals.costs), money(totals.expenses), money(totals.profit)],
+    },
+  ];
+
+  const charts: { title: string; subtitle: string; chart: ReactNode }[] = [
+    { title: 'Net sales and profit over time', subtitle: periodLabel, chart: <TrendReportChart data={salesTrend} format={money} secondaryLabel="Profit" label={`Net sales and profit, ${periodLabel}`} /> },
+    { title: 'Revenue by product', subtitle: periodLabel, chart: <BarReportChart data={productChart} horizontal format={money} label={`Revenue by product, ${periodLabel}`} /> },
+    { title: 'Category breakdown', subtitle: periodLabel, chart: <DonutReportChart data={categoryChart} format={money} label={`Revenue by category, ${periodLabel}`} /> },
+    { title: 'Top customers', subtitle: periodLabel, chart: <BarReportChart data={clientChart} horizontal format={money} label={`Revenue by customer, ${periodLabel}`} /> },
+  ];
+
+  return (
+    <div className="stagger">
+      <PageHeader
+        eyebrow="Analytics"
+        title="Sales Dashboard"
+        description="Track your sales trends, top products, and revenue growth."
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Button variant="soft" onClick={() => downloadCsv(`little-bliss-sales-analytics.csv`, tables.map(table => `${csvCell(table.heading)}\n${toCsv(table.columns, table.rows)}${table.totals ? `\n${toCsv(table.columns, [table.totals])}` : ''}`).join('\n\n'))}><Download size={16} /> Export CSV</Button>
+            <Button onClick={() => setPrinting(true)}><FileText size={16} /> Print report</Button>
           </div>
-        </div>
-        <div className="p-5">
-          <div className="flex items-end gap-1 h-40">
-            {analytics.monthlyTrend.map((m, i) => {
-              const maxRevenue = Math.max(...analytics.monthlyTrend.map(x => x.revenue));
-              const height = maxRevenue > 0 ? (m.revenue / maxRevenue) * 100 : 0;
-              return (
-                <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                  <div className={cx('w-full rounded-t-sm', height > 0 ? 'bg-primary' : 'bg-muted')} style={{ height: `${Math.max(4, height)}%` }} />
-                  <span className="text-[9px] text-muted-foreground">{m.month}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </Card>
-      <Card className="overflow-hidden">
-        <div className="flex items-center justify-between border-b px-5 py-4">
-          <div>
-            <h2 className="font-semibold">Category Breakdown</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">Revenue by product category</p>
-          </div>
-        </div>
-        <div className="p-5 space-y-3">
-          {analytics.categoryBreakdown.length ? analytics.categoryBreakdown.map(cat => {
-            const total = analytics.categoryBreakdown.reduce((s, c) => s + c.revenue, 0);
-            const pct = total > 0 ? (cat.revenue / total) * 100 : 0;
-            return (
-              <div key={cat.category}>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm font-medium">{cat.category}</span>
-                  <span className="mono text-xs font-semibold">{money(cat.revenue)}</span>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-muted">
-                  <div className="h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
-                </div>
-              </div>
-            );
-          }) : <Empty icon={BarChart3} title="No category data" detail="Sales data will appear here once you have orders." />}
-        </div>
-      </Card>
-    </div>
-    <Card className="mt-5 overflow-hidden">
-      <div className="flex items-center justify-between border-b px-5 py-4">
-        <div>
-          <h2 className="font-semibold">Top Products</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">Best-selling products by revenue</p>
-        </div>
+        }
+      />
+      <div className="mb-5 flex flex-wrap items-center gap-1 rounded-lg border bg-card p-1 w-fit">
+        {REVENUE_PERIODS.map(p => (
+          <button key={p.value} onClick={() => setPeriod(p.value)} className={cx('rounded-md px-3 py-1.5 text-xs font-semibold', period === p.value ? 'border-primary bg-primary/5 text-primary' : 'text-muted-foreground hover:bg-muted')}>
+            {p.label}
+          </button>
+        ))}
       </div>
-      <div className="p-5">
-        {analytics.topProducts.length ? (
-          <div className="space-y-3">
-            {analytics.topProducts.map((product, i) => (
-              <div key={product.productId} className="flex items-center justify-between gap-3 p-3 rounded-lg border">
-                <div className="flex items-center gap-3">
-                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-secondary text-xs font-bold text-secondary-foreground">{i + 1}</span>
-                  <div>
-                    <p className="text-sm font-semibold">{product.productName}</p>
-                    <p className="text-xs text-muted-foreground">{product.quantity} units sold</p>
-                  </div>
-                </div>
-                <span className="mono text-sm font-semibold">{money(product.revenue)}</span>
-              </div>
-            ))}
-          </div>
-        ) : <Empty icon={Box} title="No product data" detail="Product sales will appear here once you have orders." />}
+      <ReportKpiGrid kpis={kpis} />
+      <div className="mt-5 grid gap-5 xl:grid-cols-2">
+        {charts.map(entry => (
+          <ChartCard key={entry.title} title={entry.title} subtitle={entry.subtitle} empty={!orders.length}>
+            {entry.chart}
+          </ChartCard>
+        ))}
       </div>
-    </Card>
-  </div>;
+      <div className="mt-5 space-y-5">
+        {tables.map(table => <ReportTablePanel key={table.heading} table={table} />)}
+      </div>
+      <div className="mt-5 rounded-xl border bg-card p-5 text-xs leading-relaxed text-muted-foreground shadow-sm">
+        <p className="mb-2 text-sm font-semibold text-foreground">How to read this dashboard</p>
+        <ul className="space-y-1.5">
+          <li className="flex gap-2"><span className="text-primary">•</span>Net sales are product lines less discounts. Delivery and tax are passed on to the customer and are excluded.</li>
+          <li className="flex gap-2"><span className="text-primary">•</span>Gross profit is net sales less the ingredient cost recorded on the order lines. Margin is blank when nothing was sold.</li>
+          <li className="flex gap-2"><span className="text-primary">•</span>Month by month always shows the last twelve calendar months, so it stays a long view even when you narrow the period above.</li>
+        </ul>
+      </div>
+
+      {printing && (
+        <ReportPrintPortal title="Sales analysis" onClose={() => setPrinting(false)}>
+          <ReportDocument
+            settings={store.settings}
+            title="Sales analysis"
+            subtitle="Revenue, best sellers and the customers behind them."
+            period={periodLabel}
+            kpis={kpis}
+            sections={tables.map((table, index) => ({
+              heading: table.heading,
+              note: table.note,
+              chart: charts[index]?.chart,
+              columns: table.columns,
+              rows: table.rows,
+              totals: table.totals,
+              align: table.align,
+            }))}
+            notes={[
+              'Net sales are product lines less any discount. Delivery and tax are passed on to the customer and are excluded.',
+              'Ingredient cost is the cost recorded on the order lines. Labor, energy and packaging are not tracked in this app.',
+            ]}
+          />
+        </ReportPrintPortal>
+      )}
+    </div>
+  );
 }
 
 /* ─── PRODUCTION CALENDAR ─── */
 function ProductionCalendar() {
   const { store } = useStore();
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
+  const [selectedDate, setSelectedDate] = useState(() => localDateKey(new Date()));
   const schedules = useMemo(() => generateProductionSchedule(store.orders, store.recipes), [store.orders, store.recipes]);
-  const filteredSchedules = schedules.filter(s => s.date === selectedDate);
+  const filteredSchedules = schedules.filter(schedule => schedule.date === selectedDate);
 
-  const weekDates = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() + i);
-    return d.toISOString().slice(0, 10);
-  });
+  /* Local dates throughout: the store's dates are YYYY-MM-DD strings, and reading
+     them as UTC would land a bake on the wrong day west of Greenwich. */
+  const weekDates = useMemo(() => Array.from({ length: 7 }, (_, i) => {
+    const date = new Date();
+    date.setDate(date.getDate() + i);
+    return localDateKey(date);
+  }), []);
+  const todayKey = localDateKey(new Date());
 
-  return <div className="stagger">
-    <PageHeader eyebrow="Production" title="Production Calendar" description="View and manage your baking schedule based on order due dates." />
-    <div className="mb-5 flex gap-2 overflow-x-auto pb-2">
-      {weekDates.map(date => {
-        const d = new Date(date);
-        const hasItems = schedules.some(s => s.date === date);
-        return (
-          <button key={date} onClick={() => setSelectedDate(date)} className={cx('flex-shrink-0 rounded-lg border px-4 py-2 text-center min-w-[80px]', selectedDate === date ? 'border-primary bg-primary/5 text-primary' : 'hover:bg-muted')}>
-            <p className="text-[10px] text-muted-foreground">{d.toLocaleDateString('en-US', { weekday: 'short' })}</p>
-            <p className="text-sm font-semibold">{d.getDate()}</p>
-            {hasItems && <span className="mt-1 h-1 w-1 rounded-full bg-primary" />}
-          </button>
-        );
-      })}
-    </div>
-    <Card>
-      <div className="flex items-center justify-between border-b px-5 py-4">
-        <div>
-          <h2 className="font-semibold">{new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">{filteredSchedules.length} items scheduled</p>
-        </div>
+  /* Orders past their due date are excluded from the seven-day schedule by design,
+     but a baker still needs to know they exist. Count them rather than show them. */
+  const overdue = useMemo(() => {
+    const seen = new Map<string, { orderNumber: string; customerName: string; dueDate: string; items: number }>();
+    store.orders
+      .filter(order => order.paymentStatus !== 'Paid' && !order.archived && order.dueDate && order.dueDate < todayKey)
+      .forEach(order => seen.set(order.id, {
+        orderNumber: order.orderNumber,
+        customerName: order.customerName,
+        dueDate: order.dueDate,
+        items: order.items.reduce((sum, item) => sum + item.quantity, 0),
+      }));
+    return [...seen.values()].sort((a, b) => (a.dueDate < b.dueDate ? 1 : -1));
+  }, [store.orders, todayKey]);
+
+  return (
+    <div className="stagger">
+      <PageHeader eyebrow="Production" title="Production Calendar" description="View and manage your baking schedule based on order due dates." />
+      <div className="mb-5 flex gap-2 overflow-x-auto pb-2">
+        {weekDates.map(date => {
+          const day = parseLocalDate(date);
+          const hasItems = schedules.some(schedule => schedule.date === date);
+          const isToday = date === todayKey;
+          return (
+            <button key={date} onClick={() => setSelectedDate(date)} className={cx('flex-shrink-0 rounded-lg border px-4 py-2 text-center min-w-[80px]', selectedDate === date ? 'border-primary bg-primary/5 text-primary' : 'hover:bg-muted')}>
+              <p className="text-[10px] text-muted-foreground">{day.toLocaleDateString('en-US', { weekday: 'short' })}</p>
+              <p className="text-sm font-semibold">{day.getDate()}</p>
+              {isToday && <p className="text-[9px] font-semibold uppercase tracking-wide">Today</p>}
+              {hasItems && <span className="mt-1 block h-1 w-1 rounded-full bg-primary" />}
+            </button>
+          );
+        })}
       </div>
-      <div className="p-5">
-        {filteredSchedules.length ? (
-          <div className="space-y-3">
-            {filteredSchedules.map(schedule => (
-              <div key={schedule.id} className="flex items-center justify-between gap-3 p-3 rounded-lg border">
-                <div>
-                  <p className="text-sm font-semibold">{schedule.recipeName}</p>
-                  <p className="text-xs text-muted-foreground">{schedule.quantity} dozens</p>
-                </div>
-                <span className={cx('rounded-full px-2 py-1 text-[10px] font-semibold', schedule.status === 'scheduled' ? 'bg-secondary text-secondary-foreground' : 'bg-primary text-primary-foreground')}>
-                  {schedule.status}
-                </span>
-              </div>
-            ))}
+      <Card>
+        <div className="flex items-center justify-between border-b px-5 py-4">
+          <div>
+            <h2 className="font-semibold">{parseLocalDate(selectedDate).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {filteredSchedules.length} item{filteredSchedules.length === 1 ? '' : 's'} · {num(filteredSchedules.reduce((sum, schedule) => sum + schedule.quantity, 0))} dozens · {num(schedules.reduce((sum, schedule) => sum + unitsFor(schedule.quantity), 0))} units across the week
+            </p>
           </div>
-        ) : <Empty icon={CalendarDays} title="No production scheduled" detail="Items will appear here when orders have due dates within the next 7 days." />}
-      </div>
-    </Card>
-  </div>;
+        </div>
+        <div className="p-5">
+          {filteredSchedules.length ? (
+            <div className="space-y-3">
+              {filteredSchedules.map(schedule => {
+                const order = store.orders.find(candidate => candidate.id === schedule.orderId);
+                const units = unitsFor(schedule.quantity);
+                return (
+                  <div key={schedule.id} className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg border">
+                    <div>
+                      <p className="text-sm font-semibold">{schedule.recipeName}</p>
+                      <p className="text-xs text-muted-foreground">{num(schedule.quantity)} dozens · {num(units)} units</p>
+                      {order && <p className="mt-0.5 text-[11px] text-muted-foreground">{order.orderNumber} · {order.customerName} · due {shortDate(order.dueDate)}</p>}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {schedule.date === todayKey && <span className="rounded-full bg-accent/50 px-2 py-0.5 text-[10px] font-semibold">Due today</span>}
+                      <span className={cx('rounded-full px-2 py-1 text-[10px] font-semibold', schedule.status === 'scheduled' ? 'bg-secondary text-secondary-foreground' : 'bg-primary text-primary-foreground')}>
+                        {schedule.status}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : <Empty icon={CalendarDays} title="No production scheduled" detail="Items will appear here when unpaid orders have due dates within the next 7 days." />}
+        </div>
+      </Card>
+
+      {overdue.length > 0 && (
+        <Card className="mt-5 overflow-hidden">
+          <div className="border-b border-accent/40 bg-accent/20 px-5 py-4">
+            <h2 className="font-semibold">{overdue.length} unpaid order{overdue.length === 1 ? '' : 's'} already past due</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">These sit outside the seven-day calendar. Check the due date and the customer before baking.</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[560px] text-left text-sm">
+              <thead className="bg-muted/55 text-xs uppercase tracking-wider text-muted-foreground">
+                <tr><th className="px-5 py-3.5">Invoice</th><th className="px-5 py-3.5">Customer</th><th className="px-5 py-3.5 text-right">Dozens</th><th className="px-5 py-3.5">Due</th><th className="px-5 py-3.5">Days late</th></tr>
+              </thead>
+              <tbody className="divide-y">
+                {overdue.slice(0, 10).map(entry => (
+                  <tr key={entry.orderNumber} className="hover:bg-muted/25">
+                    <td className="px-5 py-3.5 font-medium">{entry.orderNumber}</td>
+                    <td className="px-5 py-3.5">{entry.customerName}</td>
+                    <td className="mono px-5 py-3.5 text-right text-[13px]">{num(entry.items)}</td>
+                    <td className="px-5 py-3.5 text-xs">{shortDate(entry.dueDate)}</td>
+                    <td className="px-5 py-3.5 text-xs text-destructive">{Math.round((parseLocalDate(todayKey).getTime() - parseLocalDate(entry.dueDate).getTime()) / 86400000)} days</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+    </div>
+  );
 }
 
 /* ─── PURCHASE ORDERS ─── */
 function PurchaseOrders() {
   const { store, update } = useStore();
   const [showGenerate, setShowGenerate] = useState(false);
+  const [printing, setPrinting] = useState(false);
+  const [status, setStatus] = useState<'all' | 'pending' | 'ordered' | 'received'>('all');
   const autoOrders = useMemo(() => generatePurchaseOrders(store.ingredients), [store.ingredients]);
 
   const handleGenerate = () => {
@@ -1920,165 +2933,473 @@ function PurchaseOrders() {
     setShowGenerate(false);
   };
 
-  return <div className="stagger">
-    <PageHeader eyebrow="Procurement" title="Purchase Orders" description="Manage ingredient reordering when stock runs low." action={<Button onClick={() => setShowGenerate(true)}><RefreshCw size={16} /> Generate Orders</Button>} />
-    {showGenerate && (
-      <Card className="mb-5 border-primary/30 bg-primary/5 p-5">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-semibold">Auto-generate purchase orders</p>
-            <p className="text-xs text-muted-foreground">{autoOrders.length} ingredients are at or below minimum stock</p>
+  const visible = store.purchaseOrders.filter(po => status === 'all' || po.status === status);
+  const pendingTotal = store.purchaseOrders.filter(po => po.status === 'pending').reduce((sum, po) => sum + (po.estimatedCost || 0), 0);
+  const suppliers = new Set(store.purchaseOrders.map(po => po.supplier).filter(Boolean));
+  const orderedTotal = store.purchaseOrders.reduce((sum, po) => sum + (po.estimatedCost || 0), 0);
+
+  const kpis: ReportKpi[] = [
+    { label: 'Open orders', value: store.purchaseOrders.filter(po => po.status === 'pending').length.toLocaleString('en-SZ'), note: 'awaiting delivery' },
+    { label: 'Pending cost', value: money(pendingTotal), note: 'estimated' },
+    { label: 'All orders', value: money(orderedTotal), note: `${store.purchaseOrders.length} raised` },
+    { label: 'Suppliers', value: suppliers.size.toLocaleString('en-SZ'), note: 'on these orders' },
+  ];
+
+  const tables: ReportTable[] = [
+    {
+      heading: 'Purchase orders',
+      note: 'Estimated cost is the ingredient’s last recorded purchase price times the quantity ordered.',
+      columns: ['Item', 'Supplier', 'Quantity', 'Unit', 'Estimated cost', 'Date', 'Status'],
+      align: ['left', 'left', 'right', 'left', 'right', 'left', 'left'],
+      rows: visible.map(po => [po.ingredientName, po.supplier || '—', num(po.quantity), po.unit || '—', money(po.estimatedCost), shortDate(po.orderDate), po.status]),
+      totals: ['Total', '', '', '', money(visible.reduce((sum, po) => sum + (po.estimatedCost || 0), 0)), '', ''],
+    },
+  ];
+
+  return (
+    <div className="stagger">
+      <PageHeader
+        eyebrow="Procurement"
+        title="Purchase Orders"
+        description="Manage ingredient reordering when stock runs low."
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Button variant="soft" onClick={() => setPrinting(true)} disabled={!store.purchaseOrders.length}><FileText size={16} /> Print order</Button>
+            <Button onClick={() => setShowGenerate(true)}><RefreshCw size={16} /> Generate Orders</Button>
           </div>
-          <div className="flex gap-2">
-            <Button variant="ghost" onClick={() => setShowGenerate(false)}>Cancel</Button>
-            <Button onClick={handleGenerate}>Generate {autoOrders.length} Orders</Button>
+        }
+      />
+
+      <Card className="mb-5 border-primary/25 bg-primary/5 p-5">
+        <div className="flex items-start gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><CircleAlert size={17} /></span>
+          <div className="text-xs leading-relaxed">
+            <p className="text-sm font-semibold">How purchase orders work here</p>
+            <ul className="mt-2 space-y-1 text-muted-foreground">
+              <li>· <span className="font-semibold text-foreground">Generate Orders</span> lists every ingredient sitting at or below its minimum level, at the quantity needed to reach twice that minimum.</li>
+              <li>· Estimated cost uses each ingredient’s last recorded purchase price. Change a price on the ingredient and the estimate follows.</li>
+              <li>· <span className="font-semibold text-foreground">Print order</span> opens a purchase order you can take to the supplier, with room to sign it off and tick items off on arrival.</li>
+              <li>· Raising orders here never touches stock. Stock moves when a delivery is recorded against it in Inventory.</li>
+            </ul>
           </div>
         </div>
       </Card>
-    )}
-    <Card>
-      <div className="flex items-center justify-between border-b px-5 py-4">
-        <div>
-          <h2 className="font-semibold">Purchase Orders</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">{store.purchaseOrders.length} orders</p>
-        </div>
-      </div>
-      <div className="p-5">
-        {store.purchaseOrders.length ? (
-          <div className="space-y-3">
-            {store.purchaseOrders.map(po => (
-              <div key={po.id} className="flex items-center justify-between gap-3 p-3 rounded-lg border">
-                <div>
-                  <p className="text-sm font-semibold">{po.ingredientName}</p>
-                  <p className="text-xs text-muted-foreground">{po.supplier} · {po.quantity} {po.unit}</p>
-                </div>
-                <div className="text-right">
-                  <p className="mono text-sm font-semibold">{money(po.estimatedCost)}</p>
-                  <span className={cx('rounded-full px-2 py-0.5 text-[10px] font-semibold', po.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : po.status === 'ordered' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800')}>
-                    {po.status}
-                  </span>
-                </div>
-              </div>
-            ))}
+
+      {showGenerate && (
+        <Card className="mb-5 border-primary/30 bg-primary/5 p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold">Auto-generate purchase orders</p>
+              <p className="text-xs text-muted-foreground">{autoOrders.length} ingredients are at or below minimum stock</p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="ghost" onClick={() => setShowGenerate(false)}>Cancel</Button>
+              <Button onClick={handleGenerate} disabled={!autoOrders.length}>Generate {autoOrders.length} Orders</Button>
+            </div>
           </div>
-        ) : <Empty icon={Package} title="No purchase orders" detail="Generate orders automatically or add them manually when stock is low." />}
+        </Card>
+      )}
+
+      <ReportKpiGrid kpis={kpis} />
+
+      <div className="mt-5 mb-4 flex flex-wrap items-center gap-1 rounded-lg border bg-card p-1 w-fit">
+        {(['all', 'pending', 'ordered', 'received'] as const).map(value => (
+          <button key={value} onClick={() => setStatus(value)} className={cx('rounded-md px-3 py-1.5 text-xs font-semibold capitalize', status === value ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')}>
+            {value} {value === 'all' ? `(${store.purchaseOrders.length})` : `(${store.purchaseOrders.filter(po => po.status === value).length})`}
+          </button>
+        ))}
       </div>
-    </Card>
-  </div>;
+
+      <div className="space-y-5">
+        {tables.map(table => <ReportTablePanel key={table.heading} table={table} />)}
+        {!store.purchaseOrders.length && (
+          <Empty icon={Package} title="No purchase orders" detail="Generate orders automatically or add them manually when stock is low." />
+        )}
+      </div>
+
+      {printing && store.purchaseOrders.length > 0 && (
+        <ReportPrintPortal title="Purchase order" onClose={() => setPrinting(false)}>
+          <PurchaseOrderDocument
+            settings={store.settings}
+            orders={store.purchaseOrders}
+            ingredients={store.ingredients}
+            status={`${store.purchaseOrders.filter(po => po.status === 'pending').length} pending of ${store.purchaseOrders.length}`}
+          />
+        </ReportPrintPortal>
+      )}
+    </div>
+  );
 }
 
 /* ─── PROFIT MARGIN CALCULATOR ─── */
 function ProfitMargin() {
   const { store } = useStore();
+  const [printing, setPrinting] = useState(false);
+  const [recipeId, setRecipeId] = useState(() => store.recipes[0]?.id || '');
+  const [price, setPrice] = useState('');
+  const [cost, setCost] = useState('');
 
-  const profitData = useMemo(() => {
-    return store.recipes.map(recipe => {
-      const cost = costPerDozen(recipe, store.ingredients);
-      const issues = recipeCostIssues(recipe, store.ingredients);
-      const revenue = recipe.retailPriceDozen;
-      const margin = revenue > 0 ? ((revenue - cost) / revenue) * 100 : 0;
-      return { recipe, cost, revenue, margin, issues };
-    }).sort((a, b) => b.margin - a.margin);
-  }, [store.recipes, store.ingredients]);
+  const profitability = useMemo(() => allRecipeProfitability(store.recipes, store.ingredients), [store.recipes, store.ingredients]);
+  const byMargin = useMemo(
+    () => [...profitability].sort((a, b) => (b.margin ?? -Infinity) - (a.margin ?? -Infinity)),
+    [profitability],
+  );
+  const costed = profitability.filter(line => line.margin !== null);
+  const averageMargin = costed.length ? costed.reduce((sum, line) => sum + (line.margin || 0), 0) / costed.length : null;
+  const best = byMargin.find(line => line.margin !== null);
+  const weakest = [...byMargin].reverse().find(line => line.margin !== null);
 
-  return <div className="stagger">
-    <PageHeader eyebrow="Profitability" title="Profit Margin Calculator" description="Analyze per-product profitability based on ingredient costs." />
-    <Card className="overflow-hidden">
-      <div className="flex items-center justify-between border-b px-5 py-4">
-        <div>
-          <h2 className="font-semibold">Product Profitability</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">Margin analysis for all recipes</p>
-        </div>
-      </div>
-      <div className="p-5">
-        {profitData.length ? (
-          <div className="space-y-3">
-            {profitData.map(({ recipe, cost, revenue, margin, issues }) => (
-              <div key={recipe.id} className="flex items-center justify-between gap-3 p-3 rounded-lg border">
-                <div className="flex-1">
-                  <p className="text-sm font-semibold">{recipe.name}</p>
-                  <p className="text-xs text-muted-foreground">Cost: {money(cost)} · Price: {money(revenue)}</p>
-                  {issues.count > 0 && <p className="mt-0.5 text-[10px] font-medium text-destructive">{recipeIssueLabel(issues)} — margin uses the priced part only</p>}
-                </div>
-                <div className="text-right">
-                  <p className={cx('mono text-sm font-semibold', margin >= 50 ? 'text-primary' : margin >= 30 ? 'text-yellow-600' : 'text-destructive')}>
-                    {margin.toFixed(1)}%
-                  </p>
-                  <p className="text-[10px] text-muted-foreground">margin</p>
-                </div>
-              </div>
-            ))}
+  /* The calculator answers "what if I sell this at a different price?" It reuses the
+     store's own margin formula, so the answer here and the answer in the table
+     above can never disagree. */
+  const selected = profitability.find(line => line.recipe.id === recipeId);
+  const calculatorPrice = price === '' ? (selected?.revenue ?? 0) : Number(price);
+  const calculatorCost = cost === '' ? (selected?.costPerDozen ?? 0) : Number(cost);
+  const calculatorProfit = roundCurrency(calculatorPrice - calculatorCost);
+  const calculatorMargin = marginFor(calculatorPrice, calculatorCost);
+  const marginAt = (rate: number) => {
+    const gross = (rate * calculatorPrice) / 100;
+    return marginFor(calculatorPrice, gross);
+  };
+
+  const kpis: ReportKpi[] = [
+    { label: 'Products priced', value: costed.length.toLocaleString('en-SZ'), note: `of ${profitability.length} recipes` },
+    { label: 'Average margin', value: pct(averageMargin), note: 'where a price is set' },
+    { label: 'Best margin', value: best ? pct(best.margin) : '—', note: best?.recipe.name || '—' },
+    { label: 'Thinnest margin', value: weakest ? pct(weakest.margin) : '—', note: weakest?.recipe.name || '—' },
+  ];
+
+  const marginChart: ChartDatum[] = byMargin.filter(line => line.margin !== null).map(line => ({ label: line.recipe.name, value: Number((line.margin || 0).toFixed(1)) }));
+
+  const tables: ReportTable[] = [
+    {
+      heading: 'Margin per product',
+      note: 'Cost per dozen is the recipe’s ingredient cost; revenue is the selling price per dozen. A product with no selling price has no margin to quote.',
+      columns: ['Product', 'Category', 'Selling price', 'Cost per dozen', 'Profit per dozen', 'Margin'],
+      align: ['left', 'left', 'right', 'right', 'right', 'right'],
+      rows: byMargin.map(line => [line.recipe.name, line.recipe.category, money(line.revenue), money(line.costPerDozen), money(line.profit), pct(line.margin)]),
+    },
+  ];
+
+  const calculatorRows: ReportTable = {
+    heading: 'What-if calculator',
+    note: 'Type a different selling price or ingredient cost to see the margin that would result, using the same formula as the table.',
+    columns: ['Measure', 'Amount'],
+    rows: [
+      ['Selling price per dozen', money(calculatorPrice)],
+      ['Cost per dozen', money(calculatorCost)],
+      ['Profit per dozen', money(calculatorProfit)],
+      ['Margin', pct(calculatorMargin)],
+      ['Margin if costs rise 10%', pct(marginAt(110))],
+      ['Margin if costs rise 25%', pct(marginAt(125))],
+    ],
+    totals: ['Margin at this price', pct(calculatorMargin)],
+  };
+
+  return (
+    <div className="stagger">
+      <PageHeader
+        eyebrow="Profitability"
+        title="Profit Margin Calculator"
+        description="Analyze per-product profitability based on ingredient costs."
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Button variant="soft" onClick={() => downloadCsv('little-bliss-profit-margin.csv', `${csvCell('Margin per product')}\n${toCsv(tables[0].columns, tables[0].rows)}`)}><Download size={16} /> Export CSV</Button>
+            <Button onClick={() => setPrinting(true)}><FileText size={16} /> Print report</Button>
           </div>
-        ) : <Empty icon={CircleDollarSign} title="No recipe data" detail="Add recipes with ingredient costs to see profit margins." />}
+        }
+      />
+
+      <ReportKpiGrid kpis={kpis} />
+
+      <Card className="mt-5 p-5">
+        <div className="mb-4">
+          <h2 className="font-semibold">What-if calculator</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">Price a product differently and see the margin that follows.</p>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Field label="Product">
+            <Select value={recipeId} onChange={event => { setRecipeId(event.target.value); setPrice(''); setCost(''); }}>
+              {store.recipes.length === 0 && <option value="">No recipes yet</option>}
+              {store.recipes.map(recipe => <option key={recipe.id} value={recipe.id}>{recipe.name}</option>)}
+            </Select>
+          </Field>
+          <Field label="Selling price per dozen" hint="Blank uses the recipe price">
+            <Input type="number" min="0" step="1" value={price} placeholder={selected ? String(selected.revenue) : '0'} onChange={event => setPrice(event.target.value)} />
+          </Field>
+          <Field label="Cost per dozen" hint="Blank uses the recipe cost">
+            <Input type="number" min="0" step="0.5" value={cost} placeholder={selected ? String(selected.costPerDozen) : '0'} onChange={event => setCost(event.target.value)} />
+          </Field>
+        </div>
+        <div className="mt-5 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-lg border bg-muted/30 p-4">
+            <p className="text-xs text-muted-foreground">Profit per dozen</p>
+            <p className={cx('mono mt-1 text-xl font-semibold', calculatorProfit < 0 && 'text-destructive')}>{money(calculatorProfit)}</p>
+          </div>
+          <div className="rounded-lg border bg-muted/30 p-4">
+            <p className="text-xs text-muted-foreground">Margin</p>
+            <p className={cx('mono mt-1 text-xl font-semibold', marginTone(calculatorMargin))}>{pct(calculatorMargin)}</p>
+          </div>
+          <div className="rounded-lg border bg-muted/30 p-4">
+            <p className="text-xs text-muted-foreground">Break-even price</p>
+            <p className="mono mt-1 text-xl font-semibold">{money(calculatorCost)}</p>
+          </div>
+        </div>
+        {selected && selected.issues.count > 0 && (
+          <p className="mt-4 text-xs font-medium text-destructive">{recipeIssueLabel(selected.issues)} — the margin above uses the priced ingredients only.</p>
+        )}
+        {calculatorMargin !== null && (
+          <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
+            At {money(calculatorPrice)} a dozen, ingredient costs rising 25% would take this margin to {pct(marginAt(125))}.
+            {calculatorMargin < 20 && ' That is a thin margin — a supplier price rise would hurt.'}
+          </p>
+        )}
+      </Card>
+
+      <div className="mt-5">
+        <ChartCard title="Margin by product" subtitle="percentage margin per dozen, highest first" empty={!marginChart.length} emptyTitle="No margin available for this data.">
+          <BarReportChart data={marginChart} horizontal format={value => `${value.toFixed(1)}%`} label="Margin by product" />
+        </ChartCard>
       </div>
-    </Card>
-  </div>;
+
+      <div className="mt-5 space-y-5">
+        {tables.map(table => <ReportTablePanel key={table.heading} table={table} />)}
+      </div>
+
+      <div className="mt-5 rounded-xl border bg-card p-5 text-xs leading-relaxed text-muted-foreground shadow-sm">
+        <p className="mb-2 text-sm font-semibold text-foreground">How margins are worked out</p>
+        <ul className="space-y-1.5">
+          <li className="flex gap-2"><span className="text-primary">•</span>Cost per dozen is the sum of the recipe’s ingredient costs divided by its batch yield, times 12.</li>
+          <li className="flex gap-2"><span className="text-primary">•</span>Margin is profit over selling price. A product with no selling price shows a dash, not zero — it is a loss waiting to be priced, not a free bake.</li>
+          <li className="flex gap-2"><span className="text-primary">•</span>Labor, energy and packaging are recorded at zero in this app and are excluded from every figure on this page.</li>
+        </ul>
+      </div>
+
+      {printing && (
+        <ReportPrintPortal title="Profit margin" onClose={() => setPrinting(false)}>
+          <ReportDocument
+            settings={store.settings}
+            title="Profit margin"
+            subtitle="What each product costs to make, and what it earns."
+            period="All recipes, at current prices and costs"
+            kpis={kpis}
+            sections={[
+              { heading: tables[0].heading, note: tables[0].note, chart: marginChart.length ? <BarReportChart data={marginChart} horizontal format={(value: number) => `${value.toFixed(1)}%`} label="Margin by product" /> : undefined, columns: tables[0].columns, rows: tables[0].rows, align: tables[0].align },
+              { heading: calculatorRows.heading, note: `${selected?.recipe.name || 'No product'} — selling ${money(calculatorPrice)} a dozen against ${money(calculatorCost)} of ingredients.`, columns: calculatorRows.columns, rows: calculatorRows.rows, totals: calculatorRows.totals },
+            ]}
+            notes={[
+              'Cost per dozen is the sum of the recipe’s ingredient costs divided by its batch yield, times 12.',
+              'Margin is profit over selling price, and is left blank where no selling price is set.',
+              'Labor, energy and packaging are recorded at zero in this app and are excluded from every figure here.',
+            ]}
+          />
+        </ReportPrintPortal>
+      )}
+    </div>
+  );
 }
 
 /* ─── FINANCIAL REPORTS ─── */
 function FinancialReports() {
   const { store } = useStore();
-  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [selectedMonth, setSelectedMonth] = useState(() => localDateKey(new Date()).slice(0, 7));
+  const [printing, setPrinting] = useState(false);
 
-  const reportData = useMemo(() => {
-    const monthOrders = store.orders.filter(o => !o.excludeFromRevenue && o.orderDate.startsWith(selectedMonth));
-    const monthExpenses = store.expenses.filter(e => e.date.startsWith(selectedMonth));
-    const revenue = monthOrders.reduce((s, o) => s + calculateOrderTotal(o.items, o.discount, o.deliveryFee, o.taxRate || 0), 0);
-    const expenses = monthExpenses.reduce((s, e) => s + e.amount, 0);
-    const profit = revenue - expenses;
+  /* A single month's orders and expenses, under the store's own revenue rules —
+     the same rules Reports and the Sales Dashboard use, so the three pages cannot
+     quote three different numbers for the same month. */
+  const monthOrders = useMemo(() => revenueOrders(store.orders, 'lifetime').filter(order => localDateKey(parseLocalDate(order.orderDate)).startsWith(selectedMonth)), [store.orders, selectedMonth]);
+  const monthExpenses = useMemo(() => store.expenses.filter(expense => localDateKey(parseLocalDate(expense.date)).startsWith(selectedMonth)), [store.expenses, selectedMonth]);
+  const totals = useMemo(() => periodTotals(monthOrders, monthExpenses), [monthOrders, monthExpenses]);
+  const expenseLines = useMemo(() => expenseBreakdown(monthExpenses), [monthExpenses]);
+  const monthLabel = useMemo(() => {
+    const [year, month] = selectedMonth.split('-').map(Number);
+    if (!year || !month) return selectedMonth;
+    return new Date(year, month - 1, 1).toLocaleDateString('en-SZ', { month: 'long', year: 'numeric' });
+  }, [selectedMonth]);
 
-    const expenseBreakdown = new Map<string, number>();
-    monthExpenses.forEach(e => {
-      const existing = expenseBreakdown.get(e.category) || 0;
-      expenseBreakdown.set(e.category, existing + e.amount);
+  const trend = useMemo(() => reportMonthlyTrend(store.orders, store.expenses, 12), [store.orders, store.expenses]);
+  const profitability = useMemo(() => allRecipeProfitability(store.recipes, store.ingredients), [store.recipes, store.ingredients]);
+  const suppliers = useMemo(() => {
+    const bySupplier = new Map<string, number>();
+    monthExpenses.forEach(expense => {
+      const name = expense.supplier || 'No supplier recorded';
+      bySupplier.set(name, (bySupplier.get(name) || 0) + expense.amount);
     });
+    return [...bySupplier.entries()].map(([supplier, amount]) => ({ supplier, amount })).sort((a, b) => b.amount - a.amount);
+  }, [monthExpenses]);
 
-    return {
-      month: selectedMonth,
-      revenue,
-      expenses,
-      profit,
-      expenseBreakdown: Array.from(expenseBreakdown.entries()).map(([category, amount]) => ({ category, amount })),
-    };
-  }, [store.orders, store.expenses, selectedMonth]);
+  const shiftMonth = (delta: number) => {
+    const [year, month] = selectedMonth.split('-').map(Number);
+    const next = new Date((year || 1970), (month || 1) - 1 + delta, 1);
+    setSelectedMonth(localDateKey(next).slice(0, 7));
+  };
 
-  return <div className="stagger">
-    <PageHeader eyebrow="Finance" title="Financial Reports" description="Monthly profit & loss and expense breakdown." />
-    <div className="mb-5">
-      <input type="month" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="h-10 rounded-lg border bg-background px-3 text-sm" />
-    </div>
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <Metric label="Revenue" value={money(reportData.revenue)} trend="total sales" icon={TrendingUp} tone="primary" note="this month" />
-      <Metric label="Expenses" value={money(reportData.expenses)} trend="total costs" icon={ArrowDownRight} tone="peach" note="this month" />
-      <Metric label="Profit" value={money(reportData.profit)} trend={reportData.revenue > 0 ? `${((reportData.profit / reportData.revenue) * 100).toFixed(1)}% margin` : '—'} icon={Sparkles} tone={reportData.profit >= 0 ? 'lime' : 'dark'} note="net profit" />
-      <Metric label="Net Margin" value={reportData.revenue > 0 ? `${((reportData.profit / reportData.revenue) * 100).toFixed(1)}%` : '—'} trend="profitability" icon={CircleDollarSign} tone="primary" note="of revenue" />
-    </div>
-    <Card className="mt-5 overflow-hidden">
-      <div className="flex items-center justify-between border-b px-5 py-4">
-        <div>
-          <h2 className="font-semibold">Expense Breakdown</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">By category</p>
+  const kpis: ReportKpi[] = [
+    { label: 'Net sales', value: money(totals.revenue), note: 'after discounts' },
+    { label: 'Gross profit', value: money(totals.grossProfit), note: `${pct(totals.grossMargin)} margin` },
+    { label: 'Expenses', value: money(totals.expenses), note: `${monthExpenses.length} entries` },
+    { label: 'Net profit', value: money(totals.profit), note: `${pct(totals.profitMargin)} margin` },
+  ];
+
+  const expenseChart: ChartDatum[] = expenseLines.map(line => ({ label: line.category, value: line.amount }));
+
+  const tables: ReportTable[] = [
+    {
+      heading: 'Profit and loss',
+      note: 'Net sales less ingredient cost is gross profit; recorded expenses then take it to net profit.',
+      columns: ['Line', 'Amount', 'Share of net sales'],
+      rows: [
+        ['Net sales', money(totals.revenue), '100.0%'],
+        ['Ingredient cost of goods sold', `-${money(totals.costs)}`, pct(totals.revenue > 0 ? shareOf(totals.costs, totals.revenue) : null)],
+        ['Gross profit', money(totals.grossProfit), pct(totals.grossMargin)],
+        ['Operating expenses', `-${money(totals.expenses)}`, pct(totals.revenue > 0 ? shareOf(totals.expenses, totals.revenue) : null)],
+        ['Net profit', money(totals.profit), pct(totals.profitMargin)],
+      ],
+      totals: ['Net profit', money(totals.profit), pct(totals.profitMargin)],
+    },
+    {
+      heading: 'Cash and orders',
+      note: 'What was received against what was invoiced in this month. Outstanding is net sales not yet paid.',
+      columns: ['Measure', 'Amount'],
+      rows: [
+        ['Orders', totals.orders.toLocaleString('en-SZ')],
+        ['Average order', money(totals.averageOrderValue)],
+        ['Received', money(totals.received)],
+        ['Outstanding', money(totals.outstanding)],
+        ['Dozens sold', num(totals.dozensSold)],
+        ['Individual items sold', num(totals.unitsSold)],
+      ],
+      totals: ['Received', money(totals.received), ''],
+    },
+    {
+      heading: 'Expenses by category',
+      columns: ['Category', 'Entries', 'Amount', 'Share'],
+      rows: expenseLines.map(line => [line.category, line.count, money(line.amount), pct(line.share)]),
+      totals: ['Total', monthExpenses.length, money(totals.expenses), monthExpenses.length ? '100.0%' : '—'],
+    },
+    {
+      heading: 'Expense detail',
+      columns: ['Date', 'Category', 'Description', 'Supplier', 'Amount'],
+      align: ['left', 'left', 'left', 'left', 'right'],
+      rows: [...monthExpenses]
+        .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+        .map(expense => [shortDate(expense.date), expense.category, expense.description || '—', expense.supplier || '—', money(expense.amount)]),
+      totals: ['Total', '', '', '', money(totals.expenses)],
+    },
+    {
+      heading: 'Expenses by supplier',
+      columns: ['Supplier', 'Amount', 'Share'],
+      rows: suppliers.map(line => [line.supplier, money(line.amount), pct(shareOf(line.amount, totals.expenses))]),
+      totals: ['Total', money(totals.expenses), totals.expenses > 0 ? '100.0%' : '—'],
+    },
+  ];
+
+  const charts: { title: string; subtitle: string; chart: ReactNode }[] = [
+    { title: 'Net sales against expenses', subtitle: 'last 12 months', chart: <GroupedBarReportChart data={trend.map(point => ({ label: point.label, value: point.revenue, secondary: point.expenses }))} format={money} secondaryLabel="Expenses" label="Net sales against expenses by month" /> },
+    { title: 'Expenses by category', subtitle: monthLabel, chart: <DonutReportChart data={expenseChart} format={money} label={`Expenses by category, ${monthLabel}`} /> },
+    { title: 'Profit by month', subtitle: 'last 12 months', chart: <TrendReportChart data={trend.map(point => ({ label: point.label, value: point.profit }))} format={money} label="Profit by month" /> },
+  ];
+
+  return (
+    <div className="stagger">
+      <PageHeader
+        eyebrow="Finance"
+        title="Financial Reports"
+        description="Monthly profit & loss and expense breakdown."
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Button variant="soft" onClick={() => downloadCsv(`little-bliss-financial-${selectedMonth}.csv`, tables.map(table => `${csvCell(table.heading)}\n${toCsv(table.columns, table.rows)}${table.totals ? `\n${toCsv(table.columns, [table.totals])}` : ''}`).join('\n\n'))}><Download size={16} /> Export CSV</Button>
+            <Button onClick={() => setPrinting(true)}><FileText size={16} /> Print report</Button>
+          </div>
+        }
+      />
+
+      <div className="mb-5 flex items-center gap-2">
+        <Button variant="ghost" onClick={() => shiftMonth(-1)} aria-label="Previous month"><ChevronLeft size={16} /></Button>
+        <input type="month" value={selectedMonth} onChange={event => setSelectedMonth(event.target.value)} className="h-10 rounded-lg border bg-background px-3 text-sm" />
+        <Button variant="ghost" onClick={() => shiftMonth(1)} aria-label="Next month"><ChevronRight size={16} /></Button>
+        <span className="text-xs text-muted-foreground">{monthLabel}</span>
+      </div>
+
+      <ReportKpiGrid kpis={kpis} />
+
+      <div className="mt-5 grid gap-5 xl:grid-cols-2">
+        {charts.map(entry => (
+          <ChartCard key={entry.title} title={entry.title} subtitle={entry.subtitle} empty={!store.orders.length && !store.expenses.length}>
+            {entry.chart}
+          </ChartCard>
+        ))}
+      </div>
+
+      <div className="mt-5 space-y-5">
+        {tables.map(table => <ReportTablePanel key={table.heading} table={table} />)}
+      </div>
+
+      <div className="mt-5 overflow-hidden rounded-xl border bg-card shadow-sm">
+        <div className="border-b px-5 py-4">
+          <h2 className="font-semibold">Estimated margin per product</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">Recipe ingredient cost against the selling price per dozen.</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] text-left text-sm">
+            <thead className="bg-muted/55 text-xs uppercase tracking-wider text-muted-foreground">
+              <tr><th className="px-5 py-3.5">Product</th><th className="px-5 py-3.5 text-right">Price</th><th className="px-5 py-3.5 text-right">Cost</th><th className="px-5 py-3.5 text-right">Profit</th><th className="px-5 py-3.5 text-right">Margin</th></tr>
+            </thead>
+            <tbody className="divide-y">
+              {profitability.length ? [...profitability].sort((a, b) => (b.margin ?? -Infinity) - (a.margin ?? -Infinity)).map(line => (
+                <tr key={line.recipe.id} className="hover:bg-muted/25">
+                  <td className="px-5 py-3.5">
+                    <p className="font-medium">{line.recipe.name}</p>
+                    {line.issues.count > 0 && <p className="text-[10px] text-destructive">{recipeIssueLabel(line.issues)}</p>}
+                  </td>
+                  <td className="mono px-5 py-3.5 text-right text-[13px]">{money(line.revenue)}</td>
+                  <td className="mono px-5 py-3.5 text-right text-[13px]">{money(line.costPerDozen)}</td>
+                  <td className="mono px-5 py-3.5 text-right text-[13px]">{money(line.profit)}</td>
+                  <td className={cx('mono px-5 py-3.5 text-right text-[13px] font-semibold', marginTone(line.margin))}>{pct(line.margin)}</td>
+                </tr>
+              )) : <tr><td colSpan={5} className="px-5 py-10 text-center text-sm font-semibold">No data available for this period.</td></tr>}
+            </tbody>
+          </table>
         </div>
       </div>
-      <div className="p-5 space-y-3">
-        {reportData.expenseBreakdown.length ? reportData.expenseBreakdown.map(cat => {
-          const total = reportData.expenseBreakdown.reduce((s, c) => s + c.amount, 0);
-          const pct = total > 0 ? (cat.amount / total) * 100 : 0;
-          return (
-            <div key={cat.category}>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-medium">{cat.category}</span>
-                <span className="mono text-xs font-semibold">{money(cat.amount)}</span>
-              </div>
-              <div className="h-2 overflow-hidden rounded-full bg-muted">
-                <div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />
-              </div>
-            </div>
-          );
-        }) : <Empty icon={Wallet} title="No expense data" detail="Expenses will appear here once recorded." />}
+
+      <div className="mt-5 rounded-xl border bg-card p-5 text-xs leading-relaxed text-muted-foreground shadow-sm">
+        <p className="mb-2 text-sm font-semibold text-foreground">How these figures are worked out</p>
+        <ul className="space-y-1.5">
+          <li className="flex gap-2"><span className="text-primary">•</span>Net sales are product lines less discounts. Delivery and tax are excluded because the customer pays them on — including them would make the bakery look richer than it is.</li>
+          <li className="flex gap-2"><span className="text-primary">•</span>Ingredient cost is the cost recorded on the order lines. Labor, energy and packaging are not tracked in this app and are not costed here.</li>
+          <li className="flex gap-2"><span className="text-primary">•</span>Margin is left blank when a month has no sales, or a product has no selling price — there is no honest percentage to show.</li>
+        </ul>
       </div>
-    </Card>
-  </div>;
+
+      {printing && (
+        <ReportPrintPortal title={`Financial report — ${monthLabel}`} onClose={() => setPrinting(false)}>
+          <ReportDocument
+            settings={store.settings}
+            title="Financial report"
+            subtitle="Profit and loss for the month, and where the money went."
+            period={monthLabel}
+            kpis={kpis}
+            sections={tables.map((table, index) => ({
+              heading: table.heading,
+              note: table.note,
+              chart: charts[index]?.chart,
+              columns: table.columns,
+              rows: table.rows,
+              totals: table.totals,
+              align: table.align,
+            }))}
+            notes={[
+              'Net sales are product lines less discounts; delivery and tax are excluded.',
+              'Ingredient cost is the cost recorded on the order lines. Labor, energy and packaging are not tracked in this app.',
+              'Margin is left blank where there is no revenue to take a margin of.',
+            ]}
+          />
+        </ReportPrintPortal>
+      )}
+    </div>
+  );
 }
 
 /* ─── EXPIRATION TRACKING ─── */
@@ -2382,97 +3703,13 @@ function StaffTasks() {
 /* ─── BACKUP & RESTORE ─── */
 function BackupRestore() {
   const { store, update } = useStore();
-  const [lastBackup, setLastBackup] = useState<string | null>(null);
-
-  const createBackup = () => {
-    const backup: BackupRecord = {
-      id: `backup-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      size: JSON.stringify(store).length,
-      location: 'local',
-      status: 'success',
-      checksum: Date.now().toString(),
-    };
-    update({ backupRecords: [...store.backupRecords, backup] });
-    setLastBackup(new Date().toISOString());
-    
-    // Download backup file
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([JSON.stringify(store, null, 2)], { type: 'application/json' }));
-    a.download = `little-bliss-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-  };
-
-  const restoreBackup = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const parsed = JSON.parse(String(reader.result)) as Store;
-        if (parsed.recipes && parsed.ingredients && parsed.settings) {
-          if (window.confirm('This will replace all current data. Continue?')) {
-            update(parsed);
-          }
-        }
-      } catch {
-        window.alert('That backup could not be read.');
-      }
-    };
-    reader.readAsText(file);
-  };
-
-  return <div className="stagger">
-    <PageHeader eyebrow="Data" title="Backup & Restore" description="Create backups and restore your bakery data." />
-    <div className="grid gap-5 xl:grid-cols-2">
-      <Card className="p-5">
-        <div className="mb-4 flex items-center gap-3">
-          <span className="rounded-lg bg-secondary p-2"><Archive size={18} /></span>
-          <div>
-            <h2 className="font-semibold">Create Backup</h2>
-            <p className="text-xs text-muted-foreground">Download a complete backup of your data</p>
-          </div>
-        </div>
-        <Button onClick={createBackup} className="w-full"><Download size={16} /> Download Backup</Button>
-        {lastBackup && <p className="mt-3 text-xs text-muted-foreground">Last backup: {new Date(lastBackup).toLocaleString()}</p>}
-      </Card>
-      <Card className="p-5">
-        <div className="mb-4 flex items-center gap-3">
-          <span className="rounded-lg bg-primary/10 p-2 text-primary"><Upload size={18} /></span>
-          <div>
-            <h2 className="font-semibold">Restore Backup</h2>
-            <p className="text-xs text-muted-foreground">Restore from a previously saved backup file</p>
-          </div>
-        </div>
-        <input type="file" accept=".json" onChange={restoreBackup} className="hidden" id="restore-file" />
-        <Button variant="soft" className="w-full" onClick={() => document.getElementById('restore-file')?.click()}><Upload size={16} /> Select Backup File</Button>
-      </Card>
-    </div>
-    <Card className="mt-5 overflow-hidden">
-      <div className="flex items-center justify-between border-b px-5 py-4">
-        <div>
-          <h2 className="font-semibold">Backup History</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">{store.backupRecords.length} backups</p>
-        </div>
-      </div>
-      <div className="p-5">
-        {store.backupRecords.length ? (
-          <div className="space-y-3">
-            {store.backupRecords.slice().reverse().map(backup => (
-              <div key={backup.id} className="flex items-center justify-between gap-3 p-3 rounded-lg border">
-                <div>
-                  <p className="text-sm font-semibold">{new Date(backup.timestamp).toLocaleString()}</p>
-                  <p className="text-xs text-muted-foreground">{(backup.size / 1024).toFixed(2)} KB · {backup.location}</p>
-                </div>
-                <span className={cx('rounded-full px-2 py-0.5 text-[10px] font-semibold', backup.status === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800')}>
-                  {backup.status}
-                </span>
-              </div>
-            ))}
-          </div>
-        ) : <Empty icon={Archive} title="No backups yet" detail="Create your first backup to secure your data." />}
-      </div>
-    </Card>
+  return <div>
+    <PageHeader
+      eyebrow="Data"
+      title="Backup & Restore"
+      description="Automatic, restorable history of your bakery data, shared across every device."
+    />
+    <SyncPanel store={store} update={update} />
   </div>;
 }
 
@@ -2481,8 +3718,8 @@ function printWithTitle(title: string, opts?: { landscape?: boolean }) {
   const pageRule = document.getElementById('lb-print-page') || document.createElement('style');
   pageRule.id = 'lb-print-page';
   pageRule.textContent = opts?.landscape
-    ? '@page { size: A4 landscape; margin: 12mm 14mm; }'
-    : '@page { size: A4 portrait; margin: 10mm; }';
+    ? '@page { size: A4 landscape; margin: 0; }'
+    : '@page { size: A4 portrait; margin: 0; }';
   if (!pageRule.parentNode) document.head.appendChild(pageRule);
 
   document.title = title;
@@ -2500,8 +3737,10 @@ function printWithTitle(title: string, opts?: { landscape?: boolean }) {
 
   window.addEventListener('afterprint', cleanup);
   window.print();
-  // Fallback for engines that skip or delay afterprint (print-to-PDF, WebViews)
-  setTimeout(cleanup, 2000);
+  // Fallback for engines that skip or delay afterprint (print-to-PDF, WebViews).
+  // Keep the title/class long enough for slow mobile PDF generation; afterprint
+  // normally cleans up as soon as the print dialog closes.
+  setTimeout(cleanup, 10000);
 }
 
 function Router() { return <Switch><Route path="/" component={Dashboard} /><Route path="/ingredients" component={Ingredients} /><Route path="/recipes" component={Recipes} /><Route path="/orders" component={Orders} /><Route path="/expenses" component={Expenses} /><Route path="/inventory" component={Inventory} /><Route path="/reports" component={Reports} /><Route path="/budget" component={Budget} /><Route path="/clients" component={Clients} /><Route path="/customer-analytics" component={CustomerAnalytics} /><Route path="/sales-analytics" component={SalesAnalytics} /><Route path="/production-calendar" component={ProductionCalendar} /><Route path="/purchase-orders" component={PurchaseOrders} /><Route path="/profit-margin" component={ProfitMargin} /><Route path="/financial-reports" component={FinancialReports} /><Route path="/expiration-tracking" component={ExpirationTracking} /><Route path="/delivery-routes" component={DeliveryRoutes} /><Route path="/whatsapp-integration" component={WhatsAppIntegration} /><Route path="/staff-tasks" component={StaffTasks} /><Route path="/backup-restore" component={BackupRestore} /><Route path="/settings" component={SettingsPage} /><Route path="/audit" component={AuditLog} /><Route path="/more" component={MoreMenu} /><Route component={NotFound} /></Switch>; }

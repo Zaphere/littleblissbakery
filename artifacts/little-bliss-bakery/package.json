@@ -4,12 +4,20 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "npm run sync:ocr && vite",
+    "build": "npm run sync:ocr && vite build",
+    "sync:ocr": "node scripts/sync-ocr.mjs",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit --incremental false && tsc -p api/tsconfig.json",
     "fonts": "node scripts/fetch-fonts.mjs",
-    "test:offline": "node scripts/offline-check.mjs"
+    "test:offline": "node scripts/offline-check.mjs",
+    "test:receipt": "node scripts/receipt-check.mjs",
+    "test:ocr": "npm run build --silent && node scripts/ocr-check.mjs",
+    "test": "npm run typecheck && npm run test:sync && npm run test:receipt && npm run test:offline",
+    "typecheck:api": "tsc -p api/tsconfig.json",
+    "test:sync": "node scripts/sync-check.mjs",
+    "test:print": "npm run build --silent && node scripts/print-check.mjs",
+    "test:reports": "npm run build --silent && node scripts/report-check.mjs"
   },
   "engines": {
     "node": ">=18"
@@ -45,7 +53,6 @@
     "@radix-ui/react-tooltip": "^1.2.16",
     "@tailwindcss/typography": "^0.5.20",
     "@tailwindcss/vite": "^4.3.3",
-
     "@types/node": "^25.9.5",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
@@ -77,6 +84,7 @@
     "zod": "^3.25.76"
   },
   "dependencies": {
+    "tesseract.js": "^6.0.1",
     "xlsx": "^0.18.5"
   }
 }

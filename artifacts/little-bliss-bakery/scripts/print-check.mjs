@@ -38,6 +38,9 @@ const MM = (n) => n / 25.4;
 // name, route to open, buttons to click in order, the final print button label
 const DOCUMENTS = [
   { name: 'recipe-book', route: '/recipes', open: ['Print all'], print: 'Print or save PDF', letter: true },
+  // Select a recipe other than the first, so this fails if "Print current" is
+  // quietly printing the default or the whole book.
+  { name: 'recipe-single', route: '/recipes', pick: 2, open: ['Print current'], print: 'Print or save PDF', letter: true, expectOne: true },
   { name: 'reference-cards', route: '/recipes', open: ['Print cards'], print: 'Print or save PDF', letter: true },
   { name: 'kitchen-order-form', route: '/orders', open: ['Order form'], print: 'Print order form', letter: false },
   { name: 'invoice', route: `/orders?invoice=${ORDER_ID}`, open: [], print: 'Print or save PDF', letter: true },
@@ -45,6 +48,15 @@ const DOCUMENTS = [
   { name: 'kitchen-order', route: `/orders?invoice=${ORDER_ID}`, open: ['Kitchen order'], print: 'Print for kitchen', letter: false },
   { name: 'shopping-list', route: '/inventory', open: ['Shopping List', 'All ingredients'], print: 'Print or save PDF', letter: true },
   { name: 'stock-check-sheet', route: '/inventory', open: ['Stock Check', 'All ingredients'], print: 'Print or save PDF', letter: false },
+  { name: 'report-sales', route: '/reports', open: ['Print report'], print: 'Print / save PDF', letter: true },
+  { name: 'report-production', route: '/reports', open: ['What to bake', 'Print report'], print: 'Print / save PDF', letter: true },
+  { name: 'report-inventory', route: '/reports', open: ['Stock value', 'Print report'], print: 'Print / save PDF', letter: true },
+  { name: 'report-customers', route: '/reports', open: ['Who buys', 'Print report'], print: 'Print / save PDF', letter: true },
+  { name: 'report-financial', route: '/reports', open: ['Profit and loss', 'Print report'], print: 'Print / save PDF', letter: true },
+  { name: 'sales-analytics', route: '/sales-analytics', open: ['Print report'], print: 'Print / save PDF', letter: true },
+  { name: 'profit-margin', route: '/profit-margin', open: ['Print report'], print: 'Print / save PDF', letter: true },
+  { name: 'financial-report', route: '/financial-reports', open: ['Print report'], print: 'Print / save PDF', letter: true },
+  { name: 'purchase-order', route: '/purchase-orders', open: ['Print order'], print: 'Print / save PDF', letter: true },
 ];
 
 function connect(url) {
@@ -123,6 +135,42 @@ async function click(cdp, sessionId, label) {
   await sleep(450);
 }
 
+/** Click the nth recipe tile in the "Choose a recipe" grid, returning its name. */
+async function pickRecipe(cdp, sessionId, index) {
+  return evaluate(cdp, sessionId, `
+    (() => {
+      const tiles = [...document.querySelectorAll('button')].filter((n) => /yield \\d+ · \\d+ ing/.test(n.textContent || ''));
+      const tile = tiles[${index}];
+      if (!tile) return null;
+      const name = (tile.querySelector('p')?.textContent || '').trim();
+      tile.click();
+      return name;
+    })()
+  `);
+}
+
+/**
+ * What the open preview actually contains. "Print current" is only correct if the
+ * sheet holds the one selected recipe and not the whole book, so the count and the
+ * heading are read back out of the live DOM rather than trusted from the click.
+ */
+async function readPortal(cdp, sessionId) {
+  return evaluate(cdp, sessionId, `
+    (() => {
+      const portal = document.querySelector('.print-portal');
+      if (!portal) return null;
+      const pages = portal.querySelectorAll('.recipe-page');
+      const heading = portal.querySelector('.report-title')?.textContent?.trim() || '';
+      return {
+        recipeCount: pages.length,
+        heading,
+        names: [...pages].map((p) => (p.querySelector('.report-product-header strong')?.textContent || '').trim()),
+        headingText: (portal.querySelector('h2')?.textContent || '').trim(),
+      };
+    })()
+  `);
+}
+
 function mediaBox(buffer) {
   const match = buffer.toString('latin1').match(/\/MediaBox\s*\[([^\]]+)\]/);
   if (!match) return '?';
@@ -141,7 +189,23 @@ async function printDocument(cdp, sessionId, doc, paper) {
   // afterprint synchronously and tear the print styles down before we can
   // capture. Swallow it; the class/style are cleaned up below.
   await evaluate(cdp, sessionId, `(() => { window.print = () => true; return true; })()`);
+  let picked = null;
+  if (doc.pick !== undefined) {
+    picked = await pickRecipe(cdp, sessionId, doc.pick);
+    if (!picked) throw new Error('no recipe tile at index ' + doc.pick + ' for ' + doc.name);
+    await sleep(400);
+  }
   for (const label of doc.open) await click(cdp, sessionId, label);
+
+  if (doc.expectOne) {
+    const portal = await readPortal(cdp, sessionId);
+    log(`   ${doc.name} preview:`, JSON.stringify(portal));
+    if (!portal) throw new Error('print preview did not open for ' + doc.name);
+    if (portal.recipeCount !== 1) throw new Error(`${doc.name}: expected 1 recipe, preview held ${portal.recipeCount}`);
+    if (portal.names[0] !== picked) throw new Error(`${doc.name}: printed "${portal.names[0]}" but "${picked}" was selected`);
+    if (portal.heading !== picked) throw new Error(`${doc.name}: heading said "${portal.heading}", expected "${picked}"`);
+  }
+
   await click(cdp, sessionId, doc.print);
 
   const armed = await evaluate(cdp, sessionId, `document.body.classList.contains('printing-doc')`);
@@ -172,15 +236,32 @@ async function printDocument(cdp, sessionId, doc, paper) {
   return { file, pages: pageCount(bytes), box: mediaBox(bytes) };
 }
 
+async function persistSeedStore(cdp, sessionId) {
+  // The app only writes to localStorage when something is edited, so flip the theme
+  // and flip it back to make it save the complete seed store once. Writing a partial
+  // object here instead would silently empty recipes and ingredients: loadStore()
+  // falls back to [] for an absent key, not to the seed data.
+  await goto(cdp, sessionId, APP.replace(/\/$/, '') + '/settings');
+  await click(cdp, sessionId, 'After hours');
+  await click(cdp, sessionId, 'Morning light');
+  return evaluate(cdp, sessionId, `
+    (() => {
+      const stored = JSON.parse(localStorage.getItem(${JSON.stringify(STORE_KEY)}) || '{}');
+      return { recipes: (stored.recipes || []).length, ingredients: (stored.ingredients || []).length };
+    })()
+  `);
+}
+
 async function seedOrder(cdp, sessionId) {
   // A fresh profile has never saved, so localStorage is empty — loadStore()
   // fills every missing field from the seed store anyway, and we only need to
-  // supply the order itself.
+  // supply the records themselves.
   return evaluate(cdp, sessionId, `
     (() => {
       const key = ${JSON.stringify(STORE_KEY)};
-      let orders = [];
-      try { orders = JSON.parse(localStorage.getItem(key) || '{}').orders || []; } catch {}
+      let stored = {};
+      try { stored = JSON.parse(localStorage.getItem(key) || '{}'); } catch {}
+      let orders = stored.orders || [];
       orders = orders.filter((o) => o.id !== ${JSON.stringify(ORDER_ID)});
       orders.push({
         id: ${JSON.stringify(ORDER_ID)},
@@ -210,8 +291,28 @@ async function seedOrder(cdp, sessionId) {
         createdAt: '2026-09-22T08:15:00.000Z',
         priority: 'Normal',
       });
-      localStorage.setItem(key, JSON.stringify({ orders }));
-      return { orders: orders.length };
+      // Expenses, stock movements and purchase orders are empty in the seed store,
+      // so the financial, inventory and procurement reports would otherwise all
+      // print as an honest but empty sheet.
+      localStorage.setItem(key, JSON.stringify({
+        ...stored,
+        orders,
+        expenses: [
+          { id: 'exp-print-1', date: '2026-09-12', category: 'Rent', description: 'September rental', supplier: 'Matsapha Properties', amount: 4500 },
+          { id: 'exp-print-2', date: '2026-09-18', category: 'Utilities', description: 'Electricity', supplier: 'EEC', amount: 780 },
+          { id: 'exp-print-3', date: '2026-09-20', category: 'Transport', description: 'Delivery fuel', supplier: 'Total', amount: 320 },
+          { id: 'exp-print-4', date: '2026-09-24', category: 'Packaging', description: 'Boxes and bags', supplier: 'Packhouse', amount: 265 },
+        ],
+        transactions: [
+          { id: 'tx-print-1', ingredientId: 'flour', type: 'purchase', quantity: 25, unitCost: 12, date: '2026-09-15', note: '25 kg bag' },
+          { id: 'tx-print-2', ingredientId: 'sugar', type: 'issue', quantity: 8, unitCost: 14, date: '2026-09-21', note: 'Wednesday bake' },
+        ],
+        purchaseOrders: [
+          { id: 'po-print-1', ingredientId: 'flour', ingredientName: 'Bread Flour', supplier: 'Mills Ltd', quantity: 50, unit: 'kg', estimatedCost: 600, status: 'pending', orderDate: '2026-09-22', notes: 'Auto-generated' },
+          { id: 'po-print-2', ingredientId: 'butter', ingredientName: 'Sunshine Margarine', supplier: 'Supermarket', quantity: 8, unit: 'kg', estimatedCost: 168, status: 'ordered', orderDate: '2026-09-23', notes: '' },
+        ],
+      }));
+      return { orders: orders.length, expenses: 4, purchaseOrders: 2 };
     })()
   `);
 }
@@ -250,8 +351,9 @@ async function main() {
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false }, sessionId);
 
     await goto(cdp, sessionId, APP);
+    const persisted = await persistSeedStore(cdp, sessionId);
     const seeded = await seedOrder(cdp, sessionId);
-    log('3. seeded', JSON.stringify(seeded));
+    log('3. seeded', JSON.stringify({ ...persisted, ...seeded }));
 
     const rows = [];
     for (const doc of DOCUMENTS) {
