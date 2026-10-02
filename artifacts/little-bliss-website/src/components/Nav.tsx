@@ -1,6 +1,7 @@
 import { AnimatePresence, motion, useMotionValueEvent, useScroll } from 'framer-motion';
 import { Menu, ShoppingBag, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { ThemeToggle } from './ThemeToggle';
 import { Btn, cx, Logo } from './ui';
 
 const LINKS = [
@@ -70,6 +71,8 @@ export function Nav({ count, onOpenCart }: { count: number; onOpenCart: () => vo
           </ul>
 
           <div className="flex items-center gap-2">
+            <ThemeToggle />
+            
             <button
               onClick={onOpenCart}
               aria-label={`Open box, ${count} item${count === 1 ? '' : 's'}`}

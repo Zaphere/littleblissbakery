@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronLeft, ChevronRight, Quote, Star } from 'lucide-react';
 import { useState } from 'react';
 import { TESTIMONIALS } from '@/data/site';
+import { FloatingCharacter } from './FloatingCharacter';
 import { Reveal, Section, SectionHead, Wrap, cx } from './ui';
 
 export function Testimonials() {
@@ -22,7 +23,13 @@ export function Testimonials() {
 
   return (
     <Section id="testimonials" tone="cream" className="py-16 sm:py-24">
-      <Wrap>
+      <Wrap className="relative">
+        <FloatingCharacter 
+          src="/Characters/Comments.png" 
+          alt="Comments character" 
+          position="right"
+          size="lg"
+        />
         <SectionHead
           eyebrow="What people say"
           title={

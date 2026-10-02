@@ -40,6 +40,38 @@
   --radius-pill: 999px;
 }
 
+/* ---------------------------------------------------------------------------
+   Dark Mode Colors
+--------------------------------------------------------------------------- */
+.dark {
+  --color-background: hsl(338 25% 8%);
+  --color-surface: hsl(338 20% 12%);
+  --color-ink: hsl(40 50% 95%);
+  --color-ink-soft: hsl(40 30% 75%);
+
+  --color-berry: hsl(338 55% 55%);
+  --color-berry-deep: hsl(338 60% 45%);
+  --color-berry-tint: hsl(338 50% 20%);
+
+  --color-pistachio: hsl(78 50% 65%);
+  --color-pistachio-deep: hsl(78 45% 50%);
+  --color-pistachio-tint: hsl(78 40% 18%);
+
+  --color-peach: hsl(24 85% 70%);
+  --color-peach-deep: hsl(24 75% 55%);
+  --color-peach-tint: hsl(24 70% 18%);
+
+  --color-honey: hsl(43 75% 60%);
+  --color-sky: hsl(203 50% 60%);
+  --color-cocoa: hsl(24 50% 35%);
+  --color-oat: hsl(338 25% 18%);
+  --color-cream: hsl(338 20% 15%);
+
+  --shadow-card: 0 1px 2px hsl(0 0% 0% / 0.3), 0 10px 28px -12px hsl(0 0% 0% / 0.4);
+  --shadow-lift: 0 2px 6px hsl(0 0% 0% / 0.4), 0 26px 50px -22px hsl(0 0% 0% / 0.5);
+  --shadow-float: 0 18px 40px -18px hsl(0 0% 0% / 0.6);
+}
+
 /* --------------------------------------------------------------------------
    Base
 -------------------------------------------------------------------------- */

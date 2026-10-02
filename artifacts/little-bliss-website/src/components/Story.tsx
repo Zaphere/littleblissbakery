@@ -1,4 +1,5 @@
 import { Reveal, Section, Wrap } from './ui';
+import { FloatingCharacter } from './FloatingCharacter';
 import { STORY_STATS } from '@/data/site';
 
 export function Story() {
@@ -8,6 +9,13 @@ export function Story() {
       <span aria-hidden className="pointer-events-none absolute -right-24 bottom-0 h-72 w-72 rounded-full bg-pistachio/18 blur-3xl" />
 
       <Wrap className="relative">
+        <FloatingCharacter 
+          src="/Characters/Our Story.png" 
+          alt="Our story character" 
+          position="right"
+          size="lg"
+          topPosition="top-[70%]"
+        />
         <div className="grid items-center gap-12 lg:grid-cols-2 lg:gap-16">
           {/* image composition */}
           <Reveal className="order-2 lg:order-1">

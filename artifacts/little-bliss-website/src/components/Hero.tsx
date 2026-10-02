@@ -21,10 +21,6 @@ function Sparkle({ className, delay = 0 }: { className?: string; delay?: number 
   );
 }
 
-const MARQUEE = [
-  'Baked at 6am', 'Homemade-style', 'Local ingredients', 'Made to order',
-  'Family recipes', 'Fresh every day', 'Warm from the oven',
-];
 
 export function Hero({ onAdd }: { onAdd: (id: string) => void }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -202,19 +198,6 @@ export function Hero({ onAdd }: { onAdd: (id: string) => void }) {
         </div>
       </Wrap>
 
-      {/* ------------------------------------------------------- ticker band */}
-      <div className="relative border-y border-ink/10 bg-ink py-3.5 text-cream overflow-hidden">
-        <div className="flex w-max animate-marquee gap-10 whitespace-nowrap">
-          {[...MARQUEE, ...MARQUEE].map((m, i) => (
-            <span key={i} className="flex items-center gap-10 text-[13px] font-medium tracking-wide text-cream/85">
-              {m}
-              <svg viewBox="0 0 12 12" className="h-2 w-2 shrink-0 text-peach" aria-hidden="true">
-                <circle cx="6" cy="6" r="5" fill="currentColor" />
-              </svg>
-            </span>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }

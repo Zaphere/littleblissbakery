@@ -2,10 +2,14 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Plus, Sparkles } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { CATEGORIES, PRODUCTS, type Category, type Product } from '@/data/site';
+import { CustomCookieBuilder } from './CustomCookieBuilder';
+import { FloatingCharacter } from './FloatingCharacter';
 import { FoodArt } from './FoodArt';
 import { Badge, Btn, Reveal, Section, SectionHead, Wrap, cx, money } from './ui';
 
 function Card({ p, i, onAdd }: { p: Product; i: number; onAdd: (id: string) => void }) {
+  const singlePrice = Math.round(p.price / 12);
+
   return (
     <motion.article
       layout
@@ -40,7 +44,10 @@ function Card({ p, i, onAdd }: { p: Product; i: number; onAdd: (id: string) => v
             <h3 className="font-display text-[17px] font-semibold leading-tight text-ink">{p.name}</h3>
             <p className="mt-1 text-[12.5px] text-ink-soft">{p.unit}</p>
           </div>
-          <p className="font-display shrink-0 text-[19px] font-semibold text-berry">{money(p.price)}</p>
+          <div className="text-right">
+            <p className="font-display shrink-0 text-[19px] font-semibold text-berry">{money(p.price)}</p>
+            <p className="text-[11px] text-ink-soft">{money(singlePrice)} each</p>
+          </div>
         </div>
 
         <p className="mt-2.5 text-[13.5px] leading-relaxed text-ink-soft">{p.blurb}</p>
@@ -73,7 +80,13 @@ export function Products({ onAdd }: { onAdd: (id: string) => void }) {
 
   return (
     <Section id="shop" className="py-16 sm:py-24">
-      <Wrap>
+      <Wrap className="relative">
+        <FloatingCharacter 
+          src="/Characters/Cutom biscuits.png" 
+          alt="Custom biscuits character" 
+          position="right"
+          size="lg"
+        />
         <SectionHead
           eyebrow="The counter"
           title={
@@ -116,16 +129,7 @@ export function Products({ onAdd }: { onAdd: (id: string) => void }) {
         </motion.div>
 
         <Reveal delay={1}>
-          <div className="mt-10 flex flex-col items-center gap-4 rounded-card border border-dashed border-berry/35 bg-berry-tint px-6 py-8 text-center">
-            <p className="font-display text-xl font-semibold text-ink">Need something custom?</p>
-            <p className="max-w-lg text-[14.5px] text-ink-soft">
-              Celebration cakes, wedding trays and dietary swaps are all on the table.
-              Tell us the occasion and we’ll quote it the same day.
-            </p>
-            <a href="#contact">
-              <Btn>Start a custom order</Btn>
-            </a>
-          </div>
+          <CustomCookieBuilder onAdd={onAdd} />
         </Reveal>
       </Wrap>
     </Section>
