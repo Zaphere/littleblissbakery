@@ -1,6 +1,0 @@
-{
-  "buildCommand": "cd artifacts/little-bliss-website && npm install && npm run build",
-  "outputDirectory": "artifacts/little-bliss-website/dist",
-  "framework": null,
-  "installCommand": "cd artifacts/little-bliss-website && npm install"
-}
