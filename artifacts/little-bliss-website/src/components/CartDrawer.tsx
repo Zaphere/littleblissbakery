@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { Minus, Plus, ShoppingBag, Trash2, X } from 'lucide-react';
+import { Minus, Plus, ShoppingBag, Trash2, X, MessageCircle } from 'lucide-react';
 import { useState } from 'react';
-import { PRODUCTS } from '@/data/site';
+import { PRODUCTS, CONTACT } from '@/data/site';
 import { FoodArt } from './FoodArt';
 import { Btn, cx, money } from './ui';
 
@@ -29,6 +29,18 @@ export function CartDrawer({
   const close = () => {
     onClose();
     setTimeout(() => setPlaced(false), 300);
+  };
+
+  const handleWhatsAppCheckout = () => {
+    const orderText = rows.map(r => 
+      `${r.qty}x ${r.product.name} - ${money(r.product.price * r.qty)}`
+    ).join('\n');
+    
+    const message = `*New Order from Little Bliss Bakery Website*\n\n${orderText}\n\n*Subtotal:* ${money(subtotal)}\n*Delivery:* ${delivery ? money(delivery) : 'Free'}\n*Total:* ${money(subtotal + delivery)}\n\nPlease confirm my order!`;
+    
+    const whatsappUrl = `https://wa.me/${CONTACT.whatsapp.replace('+', '').replace(/\s/g, '')}?text=${encodeURIComponent(message)}`;
+    window.open(whatsappUrl, '_blank');
+    setPlaced(true);
   };
 
   return (
@@ -83,10 +95,9 @@ export function CartDrawer({
                   <span className="grid h-16 w-16 place-items-center rounded-full bg-pistachio-tint text-pistachio-deep">
                     <ShoppingBag size={26} />
                   </span>
-                  <h3 className="font-display mt-5 text-2xl font-semibold text-ink">Box received!</h3>
+                  <h3 className="font-display mt-5 text-2xl font-semibold text-ink">Order sent!</h3>
                   <p className="mt-2 max-w-xs text-[14.5px] leading-relaxed text-ink-soft">
-                    In the finished site this would place a real order with the bakery.
-                    This is a prototype, so nothing was charged or sent.
+                    Your order has been sent to our WhatsApp. We'll confirm your order and arrange payment.
                   </p>
                   <Btn className="mt-6" onClick={close}>Keep browsing</Btn>
                 </motion.div>
@@ -187,11 +198,12 @@ export function CartDrawer({
                   </p>
                 )}
 
-                <Btn size="lg" className="mt-3.5 w-full" onClick={() => setPlaced(true)}>
-                  Checkout · {money(subtotal + delivery)}
+                <Btn size="lg" className="mt-3.5 w-full flex items-center justify-center gap-2" onClick={handleWhatsAppCheckout}>
+                  <MessageCircle size={18} />
+                  Order via WhatsApp · {money(subtotal + delivery)}
                 </Btn>
                 <p className="mt-2.5 text-center text-[11.5px] text-ink-soft">
-                  Prototype checkout — no payment is taken.
+                  Your order will be sent to our WhatsApp for confirmation.
                 </p>
               </footer>
             )}
