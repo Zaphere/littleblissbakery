@@ -43,9 +43,9 @@ export function Testimonials() {
         <div className="mt-12 relative">
           {/* Main testimonial card */}
           <Reveal>
-            <div className="relative overflow-hidden rounded-3xl border border-ink/10 bg-surface p-8 shadow-card sm:p-12">
-              <div className="absolute left-6 top-6 text-berry/20">
-                <Quote size={48} strokeWidth={1.5} />
+            <div className="relative overflow-hidden rounded-3xl border border-ink/10 bg-surface p-5 shadow-card sm:p-8 sm:shadow-card lg:p-12">
+              <div className="absolute left-4 top-4 text-berry/20 sm:left-6 sm:top-6">
+                <Quote size={36} strokeWidth={1.5} className="sm:size-[48px]" />
               </div>
 
               <AnimatePresence mode="wait" initial={false}>
@@ -57,24 +57,24 @@ export function Testimonials() {
                   transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
                   className="relative"
                 >
-                  <div className="mb-6 flex items-center gap-1">
+                  <div className="mb-4 flex items-center gap-1 sm:mb-6">
                     {[0, 1, 2, 3, 4].map((i) => (
                       <Star
                         key={i}
-                        size={18}
-                        className={i < current.rating ? 'fill-honey text-honey' : 'text-ink/20'}
+                        size={14}
+                        className={i < current.rating ? 'fill-honey text-honey' : 'text-ink/20 sm:size-[18px]'}
                       />
                     ))}
                   </div>
 
-                  <blockquote className="font-display text-xl leading-relaxed text-ink sm:text-2xl">
+                  <blockquote className="font-display text-lg leading-relaxed text-ink sm:text-xl lg:text-2xl">
                     "{current.text}"
                   </blockquote>
 
-                  <div className="mt-8 flex items-center justify-between gap-4">
+                  <div className="mt-6 flex items-center justify-between gap-3 sm:mt-8 sm:gap-4">
                     <div>
-                      <p className="font-display text-lg font-semibold text-ink">{current.name}</p>
-                      <p className="text-sm text-ink-soft">
+                      <p className="font-display text-base font-semibold text-ink sm:text-lg">{current.name}</p>
+                      <p className="text-xs text-ink-soft sm:text-sm">
                         {current.location} · {current.date}
                       </p>
                     </div>
@@ -83,16 +83,16 @@ export function Testimonials() {
                       <button
                         onClick={prev}
                         aria-label="Previous testimonial"
-                        className="grid h-11 w-11 place-items-center rounded-full border border-ink/12 text-ink transition-colors hover:border-berry hover:bg-berry hover:text-cream"
+                        className="grid h-9 w-9 place-items-center rounded-full border border-ink/12 text-ink transition-colors hover:border-berry hover:bg-berry hover:text-cream sm:h-11 sm:w-11"
                       >
-                        <ChevronLeft size={20} />
+                        <ChevronLeft size={16} className="sm:size-[20px]" />
                       </button>
                       <button
                         onClick={next}
                         aria-label="Next testimonial"
-                        className="grid h-11 w-11 place-items-center rounded-full border border-ink/12 text-ink transition-colors hover:border-berry hover:bg-berry hover:text-cream"
+                        className="grid h-9 w-9 place-items-center rounded-full border border-ink/12 text-ink transition-colors hover:border-berry hover:bg-berry hover:text-cream sm:h-11 sm:w-11"
                       >
-                        <ChevronRight size={20} />
+                        <ChevronRight size={16} className="sm:size-[20px]" />
                       </button>
                     </div>
                   </div>

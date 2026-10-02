@@ -22,14 +22,14 @@ export function FloatingCharacter({
   const isInView = useInView(ref, { once: false, amount: 0.3 });
 
   const sizeClasses = {
-    sm: 'w-[120px] sm:w-[150px]',
-    md: 'w-[180px] sm:w-[220px]',
-    lg: 'w-[240px] sm:w-[300px]',
+    sm: 'w-[60px] sm:w-[100px] md:w-[120px]',
+    md: 'w-[80px] sm:w-[140px] md:w-[180px]',
+    lg: 'w-[100px] sm:w-[180px] md:w-[240px]',
   };
 
   const positionClasses = {
-    left: '-left-[5%] sm:-left-[8%]',
-    right: '-right-[5%] sm:-right-[8%]',
+    left: '-left-[8%] sm:-left-[5%] md:-left-[5%]',
+    right: '-right-[8%] sm:-right-[5%] md:-right-[5%]',
   };
 
   return (

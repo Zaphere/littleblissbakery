@@ -57,16 +57,16 @@ export function CustomCookieBuilder({ onAdd }: { onAdd: (id: string) => void }) 
   };
 
   return (
-    <div className="mt-10 rounded-card border border-dashed border-berry/35 bg-berry-tint px-6 py-8 relative">
+    <div className="mt-10 rounded-card border border-dashed border-berry/35 bg-berry-tint px-4 py-6 sm:px-6 sm:py-8 relative">
       <FloatingCharacter 
         src="/Characters/Custom make.png" 
         alt="Custom make character" 
         position="left"
         size="md"
       />
-      <div className="flex flex-col items-center gap-4 text-center">
-        <p className="font-display text-xl font-semibold text-ink">Build Your Own Custom Box</p>
-        <p className="max-w-lg text-[14.5px] text-ink-soft">
+      <div className="flex flex-col items-center gap-3 text-center sm:gap-4">
+        <p className="font-display text-lg font-semibold text-ink sm:text-xl">Build Your Own Custom Box</p>
+        <p className="max-w-lg text-[13px] text-ink-soft sm:text-[14.5px]">
           Create your perfect cookie combination! Choose your base, add your favorite mix-ins, and order a minimum of 12 cookies.
         </p>
         

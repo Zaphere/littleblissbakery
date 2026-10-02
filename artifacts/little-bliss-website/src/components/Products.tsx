@@ -22,48 +22,48 @@ function Card({ p, i, onAdd }: { p: Product; i: number; onAdd: (id: string) => v
       <div className="relative overflow-hidden">
         <img src={p.image} alt={p.name} className="aspect-[5/4] w-full object-cover transition-transform duration-700 group-hover:scale-[1.06]" />
         {p.badge && (
-          <div className="absolute left-3 top-3">
+          <div className="absolute left-2 top-2 sm:left-3 sm:top-3">
             <Badge tone={p.badge === 'New' ? 'pistachio' : p.badge === 'Best seller' ? 'berry' : 'peach'}>
               {p.badge}
             </Badge>
           </div>
         )}
-        <div className="absolute inset-x-3 bottom-3 flex translate-y-3 opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100">
+        <div className="absolute inset-x-2 bottom-2 sm:inset-x-3 sm:bottom-3 flex translate-y-3 opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100">
           <button
             onClick={() => onAdd(p.id)}
-            className="flex h-10 w-full items-center justify-center gap-1.5 rounded-full bg-ink/92 text-[13px] font-semibold text-cream backdrop-blur transition-colors hover:bg-ink"
+            className="flex h-8 w-full items-center justify-center gap-1 rounded-full bg-ink/92 text-[11px] font-semibold text-cream backdrop-blur transition-colors hover:bg-ink sm:h-10 sm:text-[13px] sm:gap-1.5"
           >
-            <Plus size={15} /> Add to box
+            <Plus size={12} className="sm:size-[15px]" /> Add to box
           </button>
         </div>
       </div>
 
-      <div className="flex flex-1 flex-col p-4">
-        <div className="flex items-start justify-between gap-3">
+      <div className="flex flex-1 flex-col p-3 sm:p-4">
+        <div className="flex items-start justify-between gap-2 sm:gap-3">
           <div>
-            <h3 className="font-display text-[17px] font-semibold leading-tight text-ink">{p.name}</h3>
-            <p className="mt-1 text-[12.5px] text-ink-soft">{p.unit}</p>
+            <h3 className="font-display text-[14px] font-semibold leading-tight text-ink sm:text-[17px]">{p.name}</h3>
+            <p className="mt-0.5 text-[11px] text-ink-soft sm:mt-1 sm:text-[12.5px]">{p.unit}</p>
           </div>
           <div className="text-right">
-            <p className="font-display shrink-0 text-[19px] font-semibold text-berry">{money(p.price)}</p>
-            <p className="text-[11px] text-ink-soft">{money(singlePrice)} each</p>
+            <p className="font-display shrink-0 text-[15px] font-semibold text-berry sm:text-[19px]">{money(p.price)}</p>
+            <p className="text-[9px] text-ink-soft sm:text-[11px]">{money(singlePrice)} each</p>
           </div>
         </div>
 
-        <p className="mt-2.5 text-[13.5px] leading-relaxed text-ink-soft">{p.blurb}</p>
+        <p className="mt-2 text-[11.5px] leading-relaxed text-ink-soft sm:mt-2.5 sm:text-[13.5px]">{p.blurb}</p>
 
-        <div className="mt-auto flex flex-wrap items-center gap-1.5 pt-4">
+        <div className="mt-auto flex flex-wrap items-center gap-1 pt-3 sm:pt-4 sm:gap-1.5">
           {p.tags.map((t) => (
-            <span key={t} className="rounded-full bg-oat px-2.5 py-1 text-[10.5px] font-medium text-ink-soft">
+            <span key={t} className="rounded-full bg-oat px-2 py-0.5 text-[9px] font-medium text-ink-soft sm:px-2.5 sm:py-1 sm:text-[10.5px]">
               {t}
             </span>
           ))}
           <button
             onClick={() => onAdd(p.id)}
             aria-label={`Add ${p.name} to box`}
-            className="ml-auto grid h-9 w-9 place-items-center rounded-full border border-ink/14 text-ink transition-colors hover:border-berry hover:bg-berry hover:text-cream lg:hidden"
+            className="ml-auto grid h-8 w-8 place-items-center rounded-full border border-ink/14 text-ink transition-colors hover:border-berry hover:bg-berry hover:text-cream lg:hidden sm:h-9 sm:w-9"
           >
-            <Plus size={16} />
+            <Plus size={14} className="sm:size-[16px]" />
           </button>
         </div>
       </div>

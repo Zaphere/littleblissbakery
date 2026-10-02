@@ -50,14 +50,14 @@ function PromoCard({ p, i }: { p: Promotion; i: number }) {
           t.text,
         )}
       >
-        <div className={cx('grid gap-6 p-6 sm:p-7', i === 0 ? 'sm:grid-cols-[1.25fr_0.75fr] sm:items-center' : 'flex-1')}>
+        <div className={cx('grid gap-4 p-4 sm:gap-6 sm:p-7', i === 0 ? 'sm:grid-cols-[1.25fr_0.75fr] sm:items-center' : 'flex-1')}>
           <div className="flex flex-col justify-between">
             <div>
-              <p className={cx('eyebrow mb-3', p.tone === 'berry' ? 'text-peach' : 'text-berry')}>{p.eyebrow}</p>
-              <h3 className="font-display text-[1.7rem] leading-[1.08] font-semibold sm:text-[2rem]">{p.title}</h3>
+              <p className={cx('eyebrow mb-2 sm:mb-3', p.tone === 'berry' ? 'text-peach' : 'text-berry')}>{p.eyebrow}</p>
+              <h3 className="font-display text-[1.3rem] leading-[1.08] font-semibold sm:text-[1.7rem] sm:leading-[1.08] lg:text-[2rem]">{p.title}</h3>
               <p
                 className={cx(
-                  'mt-3 max-w-md text-[14.5px] leading-relaxed',
+                  'mt-2 max-w-md text-[12.5px] leading-relaxed sm:mt-3 sm:text-[14.5px]',
                   p.tone === 'berry' ? 'text-cream/78' : 'text-ink-soft',
                 )}
               >
@@ -65,27 +65,27 @@ function PromoCard({ p, i }: { p: Promotion; i: number }) {
               </p>
             </div>
 
-            <div className="mt-6 flex flex-wrap items-center gap-3">
+            <div className="mt-4 flex flex-wrap items-center gap-2 sm:mt-6 sm:gap-3">
               <button
                 onClick={copy}
                 className={cx(
-                  'inline-flex items-center gap-2 rounded-full border px-3.5 py-2 font-mono text-[12.5px] font-semibold tracking-[0.14em] transition-colors',
+                  'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 font-mono text-[11px] font-semibold tracking-[0.14em] transition-colors sm:px-3.5 sm:py-2 sm:text-[12.5px] sm:gap-2',
                   t.chip,
                 )}
                 aria-label={`Copy promo code ${p.code}`}
               >
-                {copied ? <Check size={13} /> : <Copy size={13} />}
+                {copied ? <Check size={11} className="sm:size-[13px]" /> : <Copy size={11} className="sm:size-[13px]" />}
                 {p.code}
               </button>
               <a href="#shop">
-                <Btn variant={t.btn} size="sm" icon={<Tag size={14} />}>
+                <Btn variant={t.btn} size="sm" icon={<Tag size={12} className="sm:size-[14px]" />}>
                   Use this deal
                 </Btn>
               </a>
             </div>
           </div>
 
-          <div className={cx(i === 0 ? 'hidden sm:block' : 'mt-5')}>
+          <div className={cx(i === 0 ? 'hidden sm:block' : 'mt-3 sm:mt-5')}>
             <div className="overflow-hidden rounded-2xl ring-1 ring-ink/10">
               <FoodArt kind={p.kind} className={cx('w-full', i === 0 ? 'aspect-[4/3] sm:aspect-square' : 'aspect-[16/10]')} />
             </div>
@@ -95,7 +95,7 @@ function PromoCard({ p, i }: { p: Promotion; i: number }) {
         <span
           aria-hidden="true"
           className={cx(
-            'pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full opacity-40 blur-2xl',
+            'pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full opacity-40 blur-2xl sm:-right-10 sm:-top-10 sm:h-40 sm:w-40',
             p.tone === 'berry' ? 'bg-peach/50' : 'bg-white/70',
           )}
         />
