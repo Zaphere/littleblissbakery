@@ -2,6 +2,5 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "framework": "vite",
-  "installCommand": "npm install --legacy-peer-deps",
-  "rootDirectory": "artifacts/little-bliss-website"
+  "installCommand": "npm install --legacy-peer-deps"
 }
