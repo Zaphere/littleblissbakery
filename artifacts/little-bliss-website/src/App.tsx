@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, motion, useScroll } from 'framer-motion';
 import { Check } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CartDrawer, type CartLine } from '@/components/CartDrawer';
@@ -20,8 +20,8 @@ export default function App() {
   const [lines, setLines] = useState<CartLine[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const [progress, setProgress] = useState(0);
   const timer = useRef<number | null>(null);
+  const { scrollYProgress } = useScroll();
 
   const add = useCallback((id: string) => {
     setLines((prev) => {
@@ -46,26 +46,16 @@ export default function App() {
     );
   }, []);
 
-  useEffect(() => {
-    const onScroll = () => {
-      const max = document.documentElement.scrollHeight - window.innerHeight;
-      setProgress(max > 0 ? window.scrollY / max : 0);
-    };
-    onScroll();
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
-  }, []);
-
   useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current); }, []);
 
   const count = lines.reduce((s, l) => s + l.qty, 0);
 
   return (
     <div className="min-h-screen bg-background">
-      <div
+      <motion.div
         aria-hidden
-        className="fixed inset-x-0 top-0 z-[55] h-[3px] origin-left bg-berry transition-transform duration-150 ease-out"
-        style={{ transform: `scaleX(${progress})` }}
+        className="fixed inset-x-0 top-0 z-[55] h-[3px] origin-left bg-berry"
+        style={{ scaleX: scrollYProgress }}
       />
 
       <Nav count={count} onOpenCart={() => setCartOpen(true)} />

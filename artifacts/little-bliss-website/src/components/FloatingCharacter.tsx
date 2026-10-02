@@ -19,7 +19,7 @@ export function FloatingCharacter({
   topPosition = 'top-1/2'
 }: FloatingCharacterProps) {
   const ref = useRef<HTMLDivElement>(null);
-  const isInView = useInView(ref, { once: false, amount: 0.3 });
+  const isInView = useInView(ref, { once: true, amount: 0.15 });
 
   const sizeClasses = {
     sm: 'w-[60px] sm:w-[100px] md:w-[120px]',
@@ -41,25 +41,19 @@ export function FloatingCharacter({
           : { opacity: 0, x: position === 'right' ? 30 : -30, y: 20, rotate: position === 'right' ? 5 : -5 }
         }
         transition={{ 
-          duration: 0.8, 
+          duration: 0.7, 
           ease: [0.16, 1, 0.3, 1],
         }}
+        style={{ willChange: 'transform, opacity' }}
         className={`absolute ${topPosition} -translate-y-1/2 ${positionClasses[position]} ${sizeClasses[size]} z-10 pointer-events-none ${className}`}
       >
         <div className="relative">
-          {/* Drop shadow */}
-          <div 
-            className="absolute inset-0 rounded-full blur-xl opacity-30"
-            style={{
-              background: 'radial-gradient(circle, rgba(0,0,0,0.3) 0%, transparent 70%)',
-              transform: 'translateY(10px)',
-            }}
-          />
-          {/* Character image */}
           <img
             src={src}
             alt={alt}
-            className="relative w-full h-auto object-contain drop-shadow-2xl"
+            loading="lazy"
+            decoding="async"
+            className="relative w-full h-auto object-contain drop-shadow-md"
           />
         </div>
       </motion.div>

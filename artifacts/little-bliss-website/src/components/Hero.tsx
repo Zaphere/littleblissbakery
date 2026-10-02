@@ -122,10 +122,13 @@ export function Hero({ onAdd }: { onAdd: (id: string) => void }) {
                 className="absolute inset-x-[8%] top-0 h-[76%] overflow-hidden rounded-[2rem] shadow-lift ring-1 ring-ink/10"
               >
                 <img
-                  src="/little-bliss-cover.png"
+                  src="/little-bliss-cover.jpg"
                   alt="A spread of freshly baked Little Bliss treats"
                   className="h-full w-full object-cover object-left"
                   loading="eager"
+                  decoding="async"
+                  width={1200}
+                  height={669}
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-ink/35 via-transparent to-transparent" />
                 <div className="absolute bottom-4 left-4 rounded-full bg-background/90 px-3 py-1.5 text-[11.5px] font-semibold text-ink backdrop-blur">

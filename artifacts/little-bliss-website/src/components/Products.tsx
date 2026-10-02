@@ -20,7 +20,13 @@ function Card({ p, i, onAdd }: { p: Product; i: number; onAdd: (id: string) => v
       className="group relative flex flex-col overflow-hidden rounded-card border border-ink/8 bg-surface shadow-card transition-all duration-300 hover:-translate-y-1.5 hover:border-ink/16 hover:shadow-lift"
     >
       <div className="relative overflow-hidden">
-        <img src={p.image} alt={p.name} className="aspect-[5/4] w-full object-cover transition-transform duration-700 group-hover:scale-[1.06]" />
+        <img
+          src={p.image}
+          alt={p.name}
+          loading="lazy"
+          decoding="async"
+          className="aspect-[5/4] w-full object-cover transition-transform duration-700 group-hover:scale-[1.06]"
+        />
         {p.badge && (
           <div className="absolute left-2 top-2 sm:left-3 sm:top-3">
             <Badge tone={p.badge === 'New' ? 'pistachio' : p.badge === 'Best seller' ? 'berry' : 'peach'}>

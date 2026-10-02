@@ -58,7 +58,6 @@ export function Newsletter() {
                     <span className="grid h-5 w-5 place-items-center rounded-full bg-pistachio text-ink">
                       <svg viewBox="0 0 12 12" className="h-3 w-3">
                         <path
-                          fill="currentColor"
                           d="M2 6l2.5 2.5L10 3"
                           stroke="currentColor"
                           strokeWidth="2"

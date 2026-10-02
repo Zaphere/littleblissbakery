@@ -52,7 +52,13 @@ export function Gallery() {
                 onClick={() => setOpen(i)}
                 className="group relative h-full w-full overflow-hidden rounded-2xl ring-1 ring-ink/10 transition-all duration-300 hover:ring-berry/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-berry"
               >
-                <img src={g.image} alt={g.caption} className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-[1.08]" />
+                <img
+                  src={g.image}
+                  alt={g.caption}
+                  loading="lazy"
+                  decoding="async"
+                  className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-[1.08]"
+                />
                 <div className="absolute inset-0 bg-gradient-to-t from-ink/75 via-ink/8 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
                 <span className="absolute inset-x-4 bottom-3 translate-y-2 text-left text-[13px] font-semibold text-cream opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100">
                   {g.caption}

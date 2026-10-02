@@ -47,3 +47,6 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Raw camera master files (preserved locally)
+raw_camera_files/

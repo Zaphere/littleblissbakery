@@ -1,31 +1,29 @@
 import { Moon, Sun } from 'lucide-react';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 export function ThemeToggle() {
+  const [isDark, setIsDark] = useState(false);
+
   useEffect(() => {
-    // Check for saved theme preference or default to light
-    const savedTheme = localStorage.getItem('theme');
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    
-    if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
-      document.documentElement.classList.add('dark');
-    }
+    // Always default to white/light theme on initial visit or refresh
+    document.documentElement.classList.remove('dark');
+    setIsDark(false);
   }, []);
 
   const toggleTheme = () => {
     const html = document.documentElement;
-    const isDark = html.classList.toggle('dark');
-    localStorage.setItem('theme', isDark ? 'dark' : 'light');
+    const nextDark = html.classList.toggle('dark');
+    setIsDark(nextDark);
   };
 
   return (
     <button
       onClick={toggleTheme}
       aria-label="Toggle dark mode"
+      title={isDark ? 'Switch to light mode' : 'Preview dark mode'}
       className="grid h-11 w-11 place-items-center rounded-full border border-ink/12 bg-surface text-ink transition-colors hover:border-berry hover:bg-berry hover:text-cream"
     >
-      <Sun className="hidden dark:block" size={18} />
-      <Moon className="block dark:hidden" size={18} />
+      {isDark ? <Sun size={18} /> : <Moon size={18} />}
     </button>
   );
 }

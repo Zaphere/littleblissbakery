@@ -22,10 +22,11 @@ export function Story() {
             <div className="relative">
               <div className="ph grain overflow-hidden rounded-[2rem] shadow-lift ring-1 ring-cream/12">
                 <img
-                  src="/little-bliss-cover.png"
+                  src="/little-bliss-cover.jpg"
                   alt="The Little Bliss counter, laid out for the morning"
                   className="aspect-[4/5] w-full object-cover object-right"
                   loading="lazy"
+                  decoding="async"
                 />
               </div>
 
